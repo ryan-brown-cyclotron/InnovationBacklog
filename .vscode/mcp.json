@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "momentum-http": {
+      "type": "http",
+      "url": "http://localhost:5100/api/mcp"
+    }
+  }
+}

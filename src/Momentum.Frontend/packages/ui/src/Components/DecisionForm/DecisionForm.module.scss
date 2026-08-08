@@ -1,0 +1,104 @@
+@use "../../Styles/tokens" as *;
+
+.bar {
+  display: flex;
+  gap: 8px;
+}
+
+.barCompact {
+  display: flex;
+  gap: 6px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formCompact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rationaleInput {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  resize: vertical;
+
+  &:focus {
+    outline: 2px solid var(--brand-primary);
+    outline-offset: 1px;
+  }
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.acceptButton {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 650;
+  cursor: pointer;
+  font-size: 13px;
+
+  &:hover {
+    background: var(--brand-hover);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+.rejectButton {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 650;
+  cursor: pointer;
+  font-size: 13px;
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+.cancelButton {
+  min-height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+}

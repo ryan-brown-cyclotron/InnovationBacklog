@@ -1,0 +1,472 @@
+@use "../../Styles/tokens" as *;
+
+.backdrop {
+  position: fixed;
+  z-index: 199;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.panel {
+  position: fixed;
+  z-index: 200;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: -16px 0 42px rgb(0 0 0 / 0.10);
+  overflow: hidden;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex: 0 0 auto;
+}
+
+.id {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.closeButton {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 24px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.description {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.decisionBar {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.acceptButton {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 20px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background var(--transition-fast);
+
+  &:hover {
+    background: var(--brand-hover);
+  }
+}
+
+.rejectButton {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 20px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background var(--transition-fast);
+
+  &:hover {
+    background: #dc2626;
+  }
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-primary);
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.metaSection {
+  flex: 0 0 auto;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.metaLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.voteButton {
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+
+  &:hover {
+    border-color: var(--brand-primary);
+    color: var(--brand-text);
+  }
+
+  &.voted {
+    background: var(--brand-soft);
+    border-color: var(--brand-primary);
+    color: var(--brand-text);
+  }
+}
+
+.linkedSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.emptyText {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.linkedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.linkedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+
+.linkedTitle {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &:hover {
+    color: var(--brand-primary);
+  }
+}
+
+.linkedMeta {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.unlinkButton {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+}
+
+.linkSearch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.linkInput {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+
+  &:focus {
+    border-color: var(--brand-primary);
+  }
+}
+
+.linkBusy {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.linkResults {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.linkResultItem {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.comment {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.commentAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.commentBody {
+  flex: 1;
+  min-width: 0;
+
+  p {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+}
+
+.commentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+
+  strong {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
+
+.privateBadge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warning);
+  background: var(--warning-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.commentTime {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.activityRow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.activityIcon {
+  color: var(--brand-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.activityBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  span:first-child {
+    color: var(--text-secondary);
+  }
+}
+
+.activityTime {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.commentForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.commentInput {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  resize: vertical;
+  outline: 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast);
+
+  &:focus {
+    border-color: var(--brand-primary);
+  }
+}
+
+.commentActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.privateToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+
+  input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--brand-primary);
+  }
+}
+
+.commentButton {
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 18px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+
+  &:hover {
+    background: var(--brand-hover);
+  }
+}

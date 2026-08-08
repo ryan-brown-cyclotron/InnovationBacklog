@@ -1,0 +1,74 @@
+{
+  "version": "1.0",
+  "appId": "3f08535d-5e42-4cd8-b9ba-59c462853efa",
+  "appDisplayName": "Innovation Backlog",
+  "region": "prod",
+  "environmentId": "b850a67f-670b-ea79-a46d-6837cb314714",
+  "description": "Ideas, reusable solutions, and the delivery work they become.",
+  "buildPath": "dist",
+  "buildEntryPoint": "index.html",
+  "localAppUrl": "http://localhost:3002",
+  "logoPath": "Default",
+  "connectionReferences": {
+    "dc8169fb-a3ca-4e36-b151-8add4eec3498": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+      "displayName": "Microsoft Dataverse",
+      "dataSources": [
+        "commondataserviceforapps"
+      ],
+      "dataSets": {}
+    },
+    "65ac995c-e872-4b74-8c99-050285d8fbf3": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_visualstudioteamservices",
+      "displayName": "Azure DevOps",
+      "dataSources": [
+        "visualstudioteamservices"
+      ],
+      "authenticationType": "EntraOAuth",
+      "dataSets": {}
+    }
+  },
+  "databaseReferences": {
+    "default.cds": {
+      "dataSources": {
+        "votes": {
+          "entitySetName": "cycai_votes",
+          "logicalName": "cycai_vote"
+        },
+        "adoptions": {
+          "entitySetName": "cycai_adoptions",
+          "logicalName": "cycai_adoption"
+        },
+        "participationrequests": {
+          "entitySetName": "cycai_participations",
+          "logicalName": "cycai_participation"
+        },
+        "activity": {
+          "entitySetName": "cycai_activities",
+          "logicalName": "cycai_activity"
+        },
+        "momentum": {
+          "entitySetName": "cycai_momentums",
+          "logicalName": "cycai_momentum"
+        },
+        "users": {
+          "entitySetName": "systemusers",
+          "logicalName": "systemuser"
+        },
+        "notes": {
+          "entitySetName": "annotations",
+          "logicalName": "annotation"
+        },
+        "environmentvariabledefinitions": {
+          "entitySetName": "environmentvariabledefinitions",
+          "logicalName": "environmentvariabledefinition"
+        },
+        "environmentvariablevalues": {
+          "entitySetName": "environmentvariablevalues",
+          "logicalName": "environmentvariablevalue"
+        }
+      },
+      "environmentVariableName": ""
+    }
+  }
+}

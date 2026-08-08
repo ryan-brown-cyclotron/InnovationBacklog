@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "@momentum/contracts#build": {
+      "outputs": []
+    },
+    "@momentum/sdk#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@momentum/ui#build": {
+      "//": "Explicitly depends on logic: ui reads the solution-kind specs from it, and ^build alone would not guarantee logic's declarations exist first.",
+      "dependsOn": ["^build", "@innovation-backlog/logic#build"],
+      "outputs": []
+    },
+    "@innovation-backlog/logic#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "@momentum/mcp-board#build": {
+      "dependsOn": ["^build"]
+    },
+    "@momentum/web#build": {
+      "dependsOn": ["^build"]
+    },
+    "@momentum/docs#build": {
+      "dependsOn": ["^build"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

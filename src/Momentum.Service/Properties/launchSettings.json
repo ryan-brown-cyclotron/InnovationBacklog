@@ -1,0 +1,18 @@
+{
+  "profiles": {
+    "Momentum.Service": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "http://localhost:5100"
+    },
+    "Momentum.Service.Auth": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "http://localhost:5100"
+    }
+  }
+}

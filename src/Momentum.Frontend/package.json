@@ -1,0 +1,32 @@
+{
+  "name": "momentum",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reference architecture for an MCP-enabled SaaS platform with generic OAuth 2.1 auth",
+  "type": "module",
+  "scripts": {
+    "build": "turbo build",
+    "build:apps": "turbo build --filter=@momentum/mcp-board --filter=@momentum/web --filter=@momentum/docs",
+    "dev": "turbo dev",
+    "clean": "turbo clean"
+  },
+  "devDependencies": {
+    "sass": "^1.83.0",
+    "tsx": "^4.21.0",
+    "turbo": "^2.5.4",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.18.0",
+    "pnpm": ">=9.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
+    "overrides": {
+      "webpack": "5.95.0"
+    }
+  },
+  "packageManager": "pnpm@10.33.0"
+}

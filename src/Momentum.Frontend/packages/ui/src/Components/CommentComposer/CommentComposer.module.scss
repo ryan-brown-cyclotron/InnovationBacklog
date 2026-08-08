@@ -1,0 +1,159 @@
+@use "../../Styles/tokens" as *;
+
+.form {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.input {
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+  outline: 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast);
+
+  &:focus {
+    border-color: var(--brand-primary);
+  }
+}
+
+.pending {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pendingItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.pendingName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.pendingSize {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pendingRemove {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--danger);
+  }
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.leftActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.attachButton {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 6px 12px;
+  min-height: 32px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--brand-primary);
+    color: var(--brand-text);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+.fileInput {
+  display: none;
+}
+
+.privateToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+
+  input {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: var(--brand-primary);
+  }
+}
+
+.submitButton {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+
+  &:hover {
+    background: var(--brand-hover);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+}

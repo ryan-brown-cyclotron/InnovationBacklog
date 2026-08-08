@@ -1,0 +1,33 @@
+:root {
+  --ifm-color-primary: #1d6b5f;
+  --ifm-color-primary-dark: #15584d;
+  --ifm-color-primary-darker: #104b42;
+  --ifm-color-primary-darkest: #0b352f;
+  --ifm-color-primary-light: #2f8577;
+  --ifm-color-primary-lighter: #46998b;
+  --ifm-color-primary-lightest: #6eb4a9;
+  --ifm-background-color: #f6f4ee;
+  --ifm-navbar-background-color: #132a24;
+  --ifm-navbar-link-color: #f6f4ee;
+  --ifm-font-family-base: 'Segoe UI', 'Avenir Next', sans-serif;
+  --ifm-heading-font-family: 'Avenir Next Condensed', 'Segoe UI', sans-serif;
+  --ifm-code-font-size: 92%;
+}
+
+.footer {
+  background: linear-gradient(140deg, #132a24, #0b1f1a 55%, #1e3e36);
+}
+
+.navbar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  letter-spacing: 0.02em;
+}
+
+.theme-doc-sidebar-menu .menu__link--active {
+  font-weight: 700;
+}

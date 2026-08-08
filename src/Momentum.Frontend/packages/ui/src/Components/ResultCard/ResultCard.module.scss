@@ -1,0 +1,68 @@
+@use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
+  text-align: left;
+  width: 100%;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--border-strong);
+  }
+}
+
+.kind {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--brand-text);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.desc {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  @include line-clamp(3);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+
+  span {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  b {
+    color: var(--brand-text);
+    font-size: 13px;
+    font-weight: 600;
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@innovation-backlog/code-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Innovation Backlog as a Power Apps code app, over Azure DevOps work items and Dataverse engagement data.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "push": "pac code push",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "@innovation-backlog/logic": "workspace:*",
+    "@momentum/sdk": "workspace:*",
+    "@momentum/ui": "workspace:*",
+    "@microsoft/power-apps": "^1.1.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@microsoft/power-apps-vite": "^1.0.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "sass": "^1.83.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}

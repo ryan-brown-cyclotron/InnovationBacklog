@@ -1,0 +1,142 @@
+@use "../../Styles/tokens" as *;
+
+.timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.comment,
+.activityRow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 4px;
+  font-size: 13px;
+}
+
+.commentAvatar,
+.activityAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.commentBody,
+.activityBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  span:first-child {
+    color: var(--text-secondary);
+  }
+}
+
+.commentHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+
+  strong {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  > span {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+}
+
+.chatBubble {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 4px 12px 12px 12px;
+  background: var(--bg-elevated);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.attachments {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--brand-text);
+
+  &:hover {
+    border-color: var(--brand-primary);
+    background: var(--brand-soft);
+  }
+}
+
+.attachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.attachmentSize {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.privateBadge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warning);
+  background: var(--warning-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.commentTime,
+.activityTime {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  flex: 0 0 auto;
+}

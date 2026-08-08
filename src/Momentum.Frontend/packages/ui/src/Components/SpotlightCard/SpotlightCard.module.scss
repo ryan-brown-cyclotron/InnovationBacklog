@@ -1,0 +1,250 @@
+@use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
+
+.spotlight {
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+.shell {
+  padding: 28px 32px 20px;
+}
+
+.kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  width: max-content;
+  margin-bottom: 14px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.kindDemand {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.kindAdoption {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.title {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.desc {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+  max-width: 720px;
+}
+
+.signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.chipNum {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.chipUp {
+  @extend .chip;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.chipRank {
+  @extend .chip;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.momentumBand {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1a1820 0%, #2d1b4e 60%, #1a1820 100%);
+  padding: 18px 32px;
+}
+
+.ambient {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 25% 50%, rgb(124 58 237 / 0.30) 0%, transparent 50%),
+    radial-gradient(ellipse at 75% 50%, rgb(167 139 250 / 0.15) 0%, transparent 45%);
+  animation: ambient-drift 8s ease-in-out infinite alternate;
+  pointer-events: none;
+
+  @include reduced-motion {
+    animation: none;
+  }
+}
+
+@keyframes ambient-drift {
+  from {
+    transform: translateX(-3%) scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateX(3%) scale(1.05);
+    opacity: 1;
+  }
+}
+
+.momentumContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  align-items: baseline;
+}
+
+.smState {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brand-soft);
+  opacity: 0.9;
+  width: 100%;
+  margin-bottom: -4px;
+}
+
+.smMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+    animation: count-roll 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+    @include reduced-motion {
+      animation: none;
+    }
+  }
+
+  span {
+    font-size: 12px;
+    color: rgb(255 255 255 / 0.6);
+  }
+}
+
+@keyframes count-roll {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.smDelta {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.up {
+  color: var(--success);
+}
+
+.down {
+  color: var(--danger);
+}
+
+.smVelocity {
+  font-size: 17px !important;
+  color: var(--focus-ring) !important;
+}
+
+.footerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 32px;
+  border-top: 1px solid var(--border-subtle);
+
+  b {
+    color: var(--brand-text);
+    font-weight: 600;
+    font-size: 13px;
+  }
+}
+
+.rank {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.dots {
+  display: flex;
+  gap: 6px;
+  padding: 0 32px 14px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: var(--border-default);
+  cursor: pointer;
+  transition: background var(--transition-fast), width var(--transition-fast);
+}
+
+.dotActive {
+  background: var(--brand-primary);
+  width: 20px;
+  border-radius: 4px;
+}

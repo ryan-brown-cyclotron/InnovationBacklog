@@ -1,0 +1,58 @@
+@use "../../Styles/tokens" as *;
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  article {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+  }
+}
+
+.actor {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.actoruser {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.actoragent {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.actorsystem {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.body {
+  strong {
+    font-size: 13px;
+    color: var(--text-primary);
+    display: block;
+  }
+
+  p {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+}
+
+time {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

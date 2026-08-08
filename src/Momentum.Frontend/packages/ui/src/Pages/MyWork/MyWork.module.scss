@@ -1,0 +1,155 @@
+@use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
+
+.workEmpty {
+  max-width: 760px;
+  padding-top: 28px;
+}
+
+.workGroups {
+  display: grid;
+  gap: 38px;
+}
+
+.workGroup {
+  h2 {
+    margin: 0 0 13px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+}
+
+.recordList {
+  display: grid;
+  gap: 8px;
+}
+
+.recordRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+
+  &:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-card);
+  }
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  small {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+}
+
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.textLinks {
+  display: grid;
+  gap: 9px;
+  margin-top: 28px;
+
+  button {
+    border: 0;
+    background: transparent;
+    color: var(--brand-text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 0;
+    text-align: left;
+
+    &:hover {
+      color: var(--brand-primary);
+    }
+  }
+}
+
+.secondaryButton {
+  min-height: 38px;
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-radius: 7px;
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+
+  &:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
+  }
+}
+
+/* Same strip as the approvals queue it now contains — the two must look like one
+   control, because after consolidation they are one. */
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tab,
+.tabActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+.tabActive {
+  color: var(--brand-text);
+  border-bottom-color: var(--brand-primary);
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: 11px;
+  font-weight: 700;
+}

@@ -1,0 +1,13 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">MCP App Starter</title>
+  <desc id="desc">Generic mark for the MCP App Starter reference platform.</desc>
+  <rect width="256" height="256" rx="48" fill="#132A24"/>
+  <circle cx="68" cy="76" r="20" fill="#6EB4A9"/>
+  <circle cx="188" cy="70" r="16" fill="#C7E2DC"/>
+  <circle cx="96" cy="168" r="18" fill="#2F8577"/>
+  <circle cx="184" cy="176" r="24" fill="#46998B"/>
+  <path d="M84 84L172 74" stroke="#E8F4F1" stroke-width="8" stroke-linecap="round"/>
+  <path d="M76 92L96 150" stroke="#E8F4F1" stroke-width="8" stroke-linecap="round"/>
+  <path d="M114 166L160 176" stroke="#E8F4F1" stroke-width="8" stroke-linecap="round"/>
+  <path d="M172 86L182 152" stroke="#E8F4F1" stroke-width="8" stroke-linecap="round"/>
+</svg>

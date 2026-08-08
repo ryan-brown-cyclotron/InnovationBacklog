@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/Momentum.Library/">
+    <Project Path="src/Momentum.Library/Momentum.Library.Domain/Momentum.Library.Domain.csproj" />
+    <Project Path="src/Momentum.Library/Momentum.Library.Application/Momentum.Library.Application.csproj" />
+    <Project Path="src/Momentum.Library/Momentum.Library.Runtime/Momentum.Library.Runtime.csproj" />
+    <Project Path="src/Momentum.Library/Momentum.Library.Infrastructure/Momentum.Library.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/.tmp/" />
+  <Folder Name="/src/">
+    <Project Path="src/Momentum.AppHost/Momentum.AppHost.csproj" />
+    <Project Path="src/Momentum.ServiceDefaults/Momentum.ServiceDefaults.csproj" />
+    <Project Path="src/Momentum.Contracts/Momentum.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Momentum.Tests/Momentum.Tests.csproj" />
+  </Folder>
+</Solution>

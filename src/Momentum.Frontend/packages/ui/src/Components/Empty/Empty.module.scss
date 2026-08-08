@@ -1,0 +1,82 @@
+@use "../../Styles/tokens" as *;
+
+.empty {
+  display: grid;
+  gap: 6px;
+  padding: 32px 24px;
+  text-align: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.empty strong {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.empty p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.contextual {
+  display: grid;
+  gap: 8px;
+  padding: 40px 32px;
+  text-align: center;
+}
+
+.contextual strong {
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.contextual p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+/* Deliberately quieter than the empty states: this is a transient condition, and a
+   heading-sized "Loading" reads as a result. */
+.pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 32px;
+}
+
+.pending p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-subtle, rgba(0, 0, 0, 0.12));
+  border-top-color: var(--accent, #6b3fd4);
+  border-radius: 50%;
+  animation: pending-spin 0.7s linear infinite;
+}
+
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respects a reduced-motion preference: the spinner is decoration, the text carries
+   the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--border-subtle, rgba(0, 0, 0, 0.12));
+  }
+}

@@ -1,0 +1,305 @@
+@use "../../Styles/tokens" as *;
+
+.backdrop {
+  position: fixed;
+  z-index: 320;
+  inset: 0;
+  background: rgb(18 12 28 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal {
+  position: relative;
+  width: min(780px, 100%);
+  background: var(--bg-surface);
+  border-radius: 16px;
+  box-shadow: 0 32px 80px rgb(18 12 28 / 0.30);
+  padding: 32px;
+}
+
+.modalForm {
+  width: min(680px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.closeButton {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.heading {
+  margin: 0 0 6px;
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.sub {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+
+  &:hover {
+    border-color: var(--brand-primary);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+}
+
+.choiceKind {
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.kindIdea {
+  color: var(--info);
+}
+
+.kindSolution {
+  color: var(--success);
+}
+
+.choiceTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.choiceText {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.choiceAction {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.backButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--brand-text);
+  }
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--text-secondary);
+  }
+
+  input,
+  textarea {
+    border: 1px solid var(--border-default);
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-size: 13px;
+    outline: 0;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: inherit;
+
+    &:focus {
+      border-color: var(--brand-primary);
+    }
+  }
+
+  textarea {
+    resize: vertical;
+  }
+}
+
+.repositoryFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+
+  .wide {
+    grid-column: 1 / -1;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.optional {
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancelButton {
+  min-height: 38px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.primaryButton {
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 18px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+
+  &:hover:not(:disabled) {
+    background: var(--brand-hover);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
+
+/* Solution-kind picker. Chosen before the rest of the form because it decides
+   which fields the form asks for. */
+.kindChoice {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+
+  legend {
+    padding: 0 0 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 650;
+  }
+}
+
+.kindOption {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+
+  &:hover {
+    border-color: var(--brand-primary);
+  }
+
+  /* :has keeps the selected state on the label without threading a class through
+     from the component. */
+  &:has(input:checked) {
+    border-color: var(--brand-primary);
+    background: var(--bg-accent-subtle, var(--bg-surface));
+  }
+
+  input {
+    margin-top: 3px;
+  }
+
+  strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  small {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}

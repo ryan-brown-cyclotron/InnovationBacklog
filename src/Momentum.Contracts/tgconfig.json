@@ -1,0 +1,7 @@
+{
+  "assemblies": ["bin/Debug/net9.0/Momentum.Contracts.dll"],
+  "outputPath": "../Momentum.Frontend/packages/contracts/src/generated",
+  "generateIndexFile": false,
+  "camelCasePropertyNames": true,
+  "typeScriptFileExtension": "ts"
+}

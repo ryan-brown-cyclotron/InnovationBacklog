@@ -1,0 +1,33 @@
+{
+  "name": "@innovation-backlog/logic",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Domain types, provider contracts, hooks and the in-memory provider for the Innovation Backlog code app. Knows nothing about Dataverse, Azure DevOps or the Power Apps SDK.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b --force",
+    "dev": "tsc -b --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "node verify.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "@momentum/contracts": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "react": "^18.3.1",
+    "typescript": "^5.7.0"
+  }
+}

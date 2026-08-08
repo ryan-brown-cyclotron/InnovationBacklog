@@ -1,0 +1,38 @@
+// Design tokens — SCSS variables mirroring the CSS custom properties
+// declared in index.scss :root. Components can @use these for SCSS-level
+// logic or reference var(--xxx) directly at runtime.
+
+$bg-page: #f8f7f9;
+$bg-surface: #ffffff;
+$bg-elevated: #f3f1f5;
+$bg-hover: #eeebf3;
+
+$border-subtle: #e8e5ed;
+$border-default: #ddd9e3;
+$border-strong: #bcb3c7;
+
+$text-primary: #1a1820;
+$text-secondary: #4b4656;
+$text-muted: #78728a;
+
+$brand-primary: #7c3aed;
+$brand-hover: #6d28d9;
+$brand-soft: #ede9fe;
+$brand-text: #5b21b6;
+$focus-ring: #a78bfa;
+
+$info: #3b82f6;
+$info-soft: #eff6ff;
+$success: #10b981;
+$success-soft: #ecfdf5;
+$warning: #f59e0b;
+$warning-soft: #fffbeb;
+$danger: #ef4444;
+$danger-soft: #fef2f2;
+
+$transition-fast: 120ms ease;
+$transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+$shadow-card: 0 1px 3px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.06);
+$shadow-card-hover: 0 4px 12px rgb(0 0 0 / 0.06), 0 2px 4px rgb(0 0 0 / 0.04);
+$shadow-search: 0 4px 24px rgb(0 0 0 / 0.06);

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Innovation Hub</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        height: 100%;
+        background: #0f0f13;
+        color: #e8e8ed;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .landing {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2rem;
+        padding: 2rem;
+        text-align: center;
+      }
+      h1 { font-size: 3rem; font-weight: 700; letter-spacing: -0.02em; }
+      h1 span { color: #7c3aed; }
+      p { font-size: 1.25rem; color: #a0a0b0; max-width: 48ch; line-height: 1.6; }
+      .actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+      .btn {
+        display: inline-block;
+        padding: 0.75rem 2rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: opacity 0.15s;
+      }
+      .btn:hover { opacity: 0.85; }
+      .btn-primary { background: #7c3aed; color: #fff; }
+      .btn-secondary { background: #1e1e2a; color: #e8e8ed; border: 1px solid #333; }
+      #app-btn { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="landing">
+      <div>
+        <h1>Innovation Hub<span>.</span></h1>
+        <p>Reference architecture for an MCP-enabled SaaS platform with generic OAuth 2.1 authentication.</p>
+      </div>
+      <div class="actions">
+        <a id="app-btn" class="btn btn-secondary" href="/">Open App</a>
+        <a class="btn btn-primary" href="/api/auth/login?returnTo=/" id="login-btn">Sign in</a>
+      </div>
+    </div>
+    <script>
+      fetch("/api/auth/me", { credentials: "include" })
+        .then(r => r.ok ? r.json() : null)
+        .then(user => {
+          if (user) {
+            document.getElementById("app-btn").style.display = "inline-block";
+            document.getElementById("login-btn").textContent = "Go to App";
+            document.getElementById("login-btn").href = "/";
+          }
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>

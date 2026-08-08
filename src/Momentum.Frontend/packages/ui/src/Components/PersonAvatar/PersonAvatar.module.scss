@@ -1,0 +1,27 @@
+@use "../../Styles/tokens" as *;
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex: 0 0 auto;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.avataruser {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.avataragent {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.avatarsystem {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}

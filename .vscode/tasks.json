@@ -1,0 +1,45 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start: MCP HTTP server (dev/no-auth)",
+			"type": "shell",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-http-dev.ps1",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"focus": true,
+				"label": "MCP HTTP (dev)"
+			},
+			"runOptions": {
+				"instanceLimit": 1
+			}
+		},
+		{
+			"label": "Start: MCP HTTP server (Auth0)",
+			"type": "shell",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-http-auth.ps1",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"focus": true,
+				"label": "MCP HTTP (Auth0)"
+			},
+			"runOptions": {
+				"instanceLimit": 1
+			}
+		}
+	]
+}

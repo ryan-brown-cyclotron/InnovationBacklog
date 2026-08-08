@@ -1,0 +1,40 @@
+# .NET
+**/bin/
+**/obj/
+artifacts/
+
+# Node and frontend builds
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.turbo/
+**/.turbo/
+src/Momentum.Service/wwwroot/apps/
+src/Momentum.Frontend/apps/docs/build/
+src/Momentum.Frontend/apps/docs/.docusaurus/
+*.tsbuildinfo
+package-lock.json
+
+# Local data
+.data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Secrets and local environment
+.env
+.env.local
+.env.*.local
+.env.auth0
+.env.auth0.dev
+.env.auth0.prod
+scripts/auth0.env
+
+# Local tooling state
+.kilo/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

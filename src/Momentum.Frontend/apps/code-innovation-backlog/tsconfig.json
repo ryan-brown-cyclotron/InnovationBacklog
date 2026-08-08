@@ -1,0 +1,25 @@
+{
+  "//": "@momentum/ui resolves to its BUILT declarations, not its source, and is not in `include`. It is compiled by its own less-strict tsconfig; pulling its sources in here would typecheck someone else's package under our rules and fail on settings it never opted into. Vite still aliases it to source, so HMR is unaffected.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["vite/client"],
+    "paths": {
+      "@innovation-backlog/logic": ["../../packages/logic/src/index.ts"],
+      "@innovation-backlog/logic/*": ["../../packages/logic/src/*"],
+      "@momentum/contracts": ["../../packages/contracts/src/index.ts"],
+      "@momentum/sdk": ["../../packages/sdk/src/index.ts"],
+      "@momentum/ui": ["../../packages/ui/dist/index.d.ts"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    ".power/**/*.ts",
+    "vite.config.ts",
+    "../../packages/logic/src/**/*"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

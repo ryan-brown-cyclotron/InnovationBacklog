@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Azure.Data.Tables" />
+    <PackageReference Include="Azure.Storage.Blobs" />
+    <PackageReference Include="Azure.Storage.Queues" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="Octokit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Momentum.Library.Application\Momentum.Library.Application.csproj" />
+    <ProjectReference Include="..\Momentum.Library.Runtime\Momentum.Library.Runtime.csproj" />
+  </ItemGroup>
+</Project>

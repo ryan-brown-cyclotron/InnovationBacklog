@@ -1,0 +1,16 @@
+{
+  "name": "momentum",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Momentum backlog and solution-catalog workspace",
+  "scripts": {
+    "build:ui": "cd src/Momentum.Frontend && pnpm build",
+    "build:apps": "cd src/Momentum.Frontend && pnpm build:apps",
+    "dev:ui": "cd src/Momentum.Frontend && pnpm dev"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

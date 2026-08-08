@@ -1,0 +1,42 @@
+@use "../../Styles/tokens" as *;
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 36px 0 16px;
+}
+
+.left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.heading h2 {
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.action {
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--brand-text);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+
+  &:hover {
+    color: var(--brand-primary);
+  }
+}

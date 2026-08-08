@@ -1,0 +1,24 @@
+@use "../../Styles/tokens" as *;
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 24px;
+}
+
+/* The eyebrow that used to sit here said "Innovation Hub" on every page, directly
+   under an app bar already saying "Innovation Hub". Removed rather than restyled:
+   it was repetition, not hierarchy. */
+
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.header p {
+  font-size: 14px;
+  color: var(--text-muted);
+}

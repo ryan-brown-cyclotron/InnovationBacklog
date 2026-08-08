@@ -1,0 +1,214 @@
+@use "../../Styles/tokens" as *;
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  text-align: left;
+  margin-bottom: 8px;
+  width: 100%;
+  overflow: hidden;
+
+  &:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  &:hover .hoverReveal {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.need {
+  border-left: 3px solid var(--info);
+}
+
+.solution {
+  border-left: 3px solid var(--success);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kindLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.need .kindLabel {
+  color: var(--info);
+}
+
+.solution .kindLabel {
+  color: var(--success);
+}
+
+.eyebrowSeparator {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.eyebrowStatus {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.chipNeed {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.chipSolution {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.description {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(12px * 1.5 * 2);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.traction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.participation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.freshness {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.count {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.velocity {
+  color: var(--brand-text);
+}
+
+.metric {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.emptyTraction {
+  font-style: italic;
+}
+
+.hoverReveal {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 16px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--bg-surface) 40%,
+    var(--bg-surface) 100%
+  );
+}
+
+.hoverAction {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-text);
+  pointer-events: none;
+}
+
+.hoverAdopt {
+  pointer-events: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--bg-surface);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+
+  &:hover {
+    background: var(--success-soft);
+    border-color: var(--success);
+  }
+}

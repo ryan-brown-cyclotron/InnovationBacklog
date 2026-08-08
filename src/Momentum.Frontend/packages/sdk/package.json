@@ -1,0 +1,30 @@
+{
+  "name": "@momentum/sdk",
+  "version": "1.0.0",
+  "description": "SDK for the Momentum platform — types, service interfaces, and MCP wiring",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b --force",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@momentum/contracts": "workspace:*",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

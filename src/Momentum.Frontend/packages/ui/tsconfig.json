@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@momentum/sdk": ["../sdk/dist/index.d.ts"],
+      "@innovation-backlog/logic": ["../logic/dist/index.d.ts"],
+      "@momentum/contracts": ["../contracts/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*", "src/**/*.module.scss"],
+  "exclude": ["node_modules", "dist"]
+}
