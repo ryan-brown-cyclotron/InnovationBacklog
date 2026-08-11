@@ -7,7 +7,7 @@
   top: 0;
   min-height: 60px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 34px;
   padding: 0 clamp(20px, 4vw, 48px);
@@ -44,6 +44,40 @@
   border-radius: 8px;
   font-size: 18px;
   font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.navItem {
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.navItemActive {
+  background: var(--bg-nav-active, rgba(98, 41, 209, 0.1));
+  color: var(--brand-text);
+  font-weight: 600;
+}
+
+.searchContainer {
+  min-width: 0;
+  flex: 0 1 320px;
 }
 
 .spacer {

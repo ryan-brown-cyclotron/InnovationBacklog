@@ -9,17 +9,21 @@ export interface DiscoveryProps {
   query: string;
   results: DiscoveryItem[];
   onOpen: (item: DiscoveryItem) => void;
+  heading?: string;
 }
 
 export function Discovery({
   query,
   results,
   onOpen,
+  heading,
 }: DiscoveryProps): React.ReactElement {
+  const pageTitle = heading || "Search Innovation Hub";
+
   return (
     <section>
       <PageHeader
-        title="Search Innovation Hub"
+        title={pageTitle}
         detail={`${results.length} matches`}
       />
       <p className={styles.pageIntro}>

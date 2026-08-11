@@ -14,7 +14,9 @@ import type {
 export type View =
   | "home"
   | "requests"
+  | "ideas"
   | "solutions"
+  | "people"
   | "search"
   | "approvals"
   | "dashboard";
@@ -66,8 +68,8 @@ export type SearchResult = { items: SearchItem[]; totalCount: number };
 // `submittedBy` and `subtype` come from SearchItem; the rest are derived
 // client-side from the workspace summaries.
 export type DiscoveryItem = SearchItem & {
-  kind: "Need" | "Solution";
-  source: "request" | "solution";
+  kind: "Need" | "Solution" | "Person";
+  source: "request" | "solution" | "person";
   voteCount?: number;
   votes30d?: number;
   adoptionCount?: number;

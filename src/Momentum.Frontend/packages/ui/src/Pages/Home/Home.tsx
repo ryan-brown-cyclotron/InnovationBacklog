@@ -19,7 +19,6 @@ import {
   requestStatusName,
 } from "../../utils";
 import { useReveal } from "../../Hooks/useReveal";
-import { CommandSearch } from "../../Components/CommandSearch/CommandSearch";
 import { ActivitySplit } from "../../Components/ActivitySplit/ActivitySplit";
 import { SectionHeading } from "../../Components/SectionHeading/SectionHeading";
 import { NeedGroups } from "../../Components/NeedGroups/NeedGroups";
@@ -37,18 +36,13 @@ export interface HomeProps {
   solutionSummary: SolutionSummary;
   canGovern: boolean;
   onContribute: (kind: ContributionKind | null) => void;
-  query: string;
   setQuery: (value: string) => void;
-  onExploreNeeds: () => void;
-  onExploreSolutions: () => void;
-  busy: boolean;
   /**
    * The workspace fetch, which is not the same thing as `busy`.
    *
-   * `busy` tracks the search box. Every empty state on this page is derived from
-   * array length, so with nothing tracking the initial load the page confidently
-   * announced "Nothing happening yet" while Azure DevOps and Dataverse were still
-   * answering.
+   * Every empty state on this page is derived from array length, so with nothing
+   * tracking the initial load the page confidently announced "Nothing happening yet"
+   * while Azure DevOps and Dataverse were still answering.
    */
   loading?: boolean;
   onOpenDiscovery: (item: DiscoveryItem) => void;
@@ -68,11 +62,7 @@ export function Home({
   solutionSummary,
   canGovern,
   onContribute,
-  query,
   setQuery,
-  onExploreNeeds,
-  onExploreSolutions,
-  busy,
   loading,
   onOpenDiscovery,
   onOpenSolution,
@@ -207,21 +197,6 @@ export function Home({
             promising ideas move forward.
           </p>
         </div>
-        {!isEmpty && (
-          <div>
-            <div className={styles.searchWrap}>
-              <CommandSearch
-                query={query}
-                setQuery={setQuery}
-                // The dropdown is the result: it previews matches and opens
-                // them directly, and the list below stays as it is.
-                onSearch={() => {}}
-                onOpenItem={onOpenDiscovery}
-                busy={busy}
-              />
-            </div>
-          </div>
-        )}
         {!isEmpty && (
           <div className={styles.heroMetrics}>
             <div className={styles.metric}>

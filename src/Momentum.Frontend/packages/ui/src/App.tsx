@@ -139,6 +139,16 @@ export function App(): React.ReactElement {
     await search.search(query, scope);
   }
 
+  function onNavigate(next: View) {
+    setView(next);
+    // Auto-fetch when navigating to Ideas or Solutions views
+    if (next === "ideas") {
+      void search.search(query, "needs");
+    } else if (next === "solutions") {
+      void search.search(query, "solutions");
+    }
+  }
+
   async function openSolution(solution: Solution) {
     syncModalUrl("solution", solution.id);
     // Only one engagement modal at a time.
@@ -174,6 +184,11 @@ export function App(): React.ReactElement {
       return;
     }
     try {
+      // Person profile branch (Phase C) — placeholder for now, pending People view implementation
+      if (item.source === "person") {
+        // TODO: open Person profile view
+        return;
+      }
       const endpoint = item.source === "solution" ? "solutions" : "requests";
       if (item.source === "solution") {
         const solution = await api<Solution>(`/api/${endpoint}/${item.itemId}`);
@@ -220,13 +235,13 @@ export function App(): React.ReactElement {
   return (
     <div className="workspace">
       <Topbar
-        onHome={() => setView("home")}
+        view={view}
+        onNavigate={onNavigate}
         onContribute={() => beginContribution()}
         userName={userFirst}
         userInitials={userInitials}
         role={role}
-        onMyWork={() => setView("requests")}
-        onDashboard={() => setView("dashboard")}
+        showDashboard={canGovern}
         // Only a reviewer has a queue, so for everyone else this is zero and the
         // badge and its pip are simply absent.
         pendingCount={
@@ -235,6 +250,11 @@ export function App(): React.ReactElement {
         onSignOut={() => {
           window.location.href = "/api/auth/logout";
         }}
+        query={query}
+        setQuery={setQuery}
+        onSearch={() => void runSearch()}
+        onOpenItem={(item) => void openDiscovery(item)}
+        searchBusy={search.busy}
       />
       <main
         className={
@@ -270,11 +290,7 @@ export function App(): React.ReactElement {
             solutionSummary={workspace.state.solutionSummary}
             canGovern={canGovern}
             onContribute={beginContribution}
-            query={query}
             setQuery={setQuery}
-            onExploreNeeds={() => void runSearch("needs")}
-            onExploreSolutions={() => void runSearch("solutions")}
-            busy={search.busy}
             loading={workspace.busy}
             onOpenDiscovery={(item) => void openDiscovery(item)}
             onOpenSolution={(solution) => void openSolution(solution)}
@@ -284,6 +300,26 @@ export function App(): React.ReactElement {
             }}
             onOpenApprovals={canGovern ? () => setView("requests") : undefined}
           />
+        )}
+        {(view === "ideas" || view === "solutions" || view === "search") && (
+          <DiscoveryView
+            query={query}
+            results={search.results}
+            onOpen={(item) => void openDiscovery(item)}
+            heading={
+              view === "ideas"
+                ? "Ideas"
+                : view === "solutions"
+                  ? "Solutions"
+                  : undefined
+            }
+          />
+        )}
+        {view === "people" && (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <h2>People</h2>
+            <p>Coming soon</p>
+          </div>
         )}
         {view === "requests" && (
           <MyWork
@@ -322,13 +358,6 @@ export function App(): React.ReactElement {
           />
         )}
         {view === "dashboard" && <Dashboard />}
-        {view === "search" && (
-          <DiscoveryView
-            query={query}
-            results={search.results}
-            onOpen={(item) => void openDiscovery(item)}
-          />
-        )}
       </main>
       {contributeOpen && (
         <ContributeModal

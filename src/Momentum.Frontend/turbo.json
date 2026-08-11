@@ -10,7 +10,6 @@
       "outputs": ["dist/**"]
     },
     "@momentum/ui#build": {
-      "//": "Explicitly depends on logic: ui reads the solution-kind specs from it, and ^build alone would not guarantee logic's declarations exist first.",
       "dependsOn": ["^build", "@innovation-backlog/logic#build"],
       "outputs": []
     },
