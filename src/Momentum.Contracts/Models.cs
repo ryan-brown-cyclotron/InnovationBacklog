@@ -143,6 +143,84 @@ public sealed record SolutionSummaryEntry(
     bool VotedByMe,
     int Comments);
 
+// ---------------------------------------------------------------------------
+// Insights — the dashboard
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Programme-level numbers, computed live from the rows that hold them.
+///
+/// EVERY FIGURE HERE MUST SURVIVE THE QUESTION "WHERE DID IT COME FROM". Anything a
+/// host cannot actually measure is null, never zero, and the tiles that can be
+/// measured more than one way carry a string saying which way was used. A confident
+/// zero is indistinguishable from a real one, which is exactly how a rollup table
+/// nothing had ever written to went unnoticed.
+/// </summary>
+[ExportTsInterface]
+public sealed record InsightsResponse(
+    string GeneratedAt,
+    IdeaFlowInsightsResponse Ideas,
+    ApprovalInsightsResponse Approval,
+    VoterInsightsResponse Voters,
+    EngagementInsightsResponse Engagement30d,
+    SolutionInsightsResponse Solutions,
+    IReadOnlyList<FunnelStageResponse> Funnel,
+    IReadOnlyList<ContributorInsightResponse> Contributors);
+
+/// <summary>
+/// One person and what they have done, ranked by the total. <c>Name</c> is null where the
+/// store already keys on an identity a reader can be shown — this host's actor id is a
+/// UserId, so the surface derives the name from it.
+/// </summary>
+[ExportTsInterface]
+public sealed record ContributorInsightResponse(
+    string Id,
+    string? Name,
+    int Ideas,
+    int Votes,
+    int Comments,
+    int Adoptions,
+    int Total);
+
+[ExportTsInterface]
+public sealed record FunnelStageResponse(string Label, int Value, string? Detail);
+
+[ExportTsInterface]
+public sealed record IdeaFlowInsightsResponse(int Total, int Submitted30d, int SubmittedPrior30d);
+
+/// <summary>Time from submission to decision, and what is still waiting.</summary>
+[ExportTsInterface]
+public sealed record ApprovalInsightsResponse(
+    double? MedianDays,
+    double? P90Days,
+    int SampleSize,
+    string Source,
+    int StaleCount,
+    int StaleAfterDays);
+
+/// <summary>
+/// Vote breadth and concentration. <c>Population</c> is null here because this host
+/// has no user directory to count — saying so is the point.
+/// </summary>
+[ExportTsInterface]
+public sealed record VoterInsightsResponse(
+    int Distinct,
+    int TotalVotes,
+    int? Population,
+    string? PopulationSource,
+    double? TopTenShare);
+
+/// <summary>Volume over the last 30 days. Null means "no way to create one yet".</summary>
+[ExportTsInterface]
+public sealed record EngagementInsightsResponse(
+    int Votes,
+    int Comments,
+    int? Participation,
+    int Adoptions);
+
+[ExportTsInterface]
+public sealed record SolutionInsightsResponse(int Total, int Adopted);
+
 [ExportTsInterface]
 public sealed record ActivityResponseItem(
     string Id,

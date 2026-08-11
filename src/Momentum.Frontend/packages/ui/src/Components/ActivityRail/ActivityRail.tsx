@@ -45,7 +45,7 @@ export function ActivityRail({
                 <span className={styles.railText}>
                   <strong>{actor}</strong>{" "}
                   <span className={styles.railTarget}>
-                    {activityPhrase(record.action)}
+                    {activityPhrase(record.action, record.summary)}
                   </span>
                   <span className={styles.railTime}> · {relativeTime(record.occurredAt)}</span>
                 </span>

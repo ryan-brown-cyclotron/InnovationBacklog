@@ -95,6 +95,14 @@ function toParticipation(row: Cycai_participations): Participation {
 export interface EngagementOptions {
   /** Dataverse systemuserid of the caller. Null until identity resolves. */
   currentUserId: () => Promise<string | null>;
+  /**
+   * Turns adopter GUIDs into names, batched for the whole list.
+   *
+   * `cycai_startedbyid` is a lookup, so the row carries a GUID and nothing else —
+   * which is "Someone" at every position a reader expects a person. Same arrangement,
+   * and the same best-effort contract, as the activity feed's actor resolution.
+   */
+  resolveUsers?: (ids: string[]) => Promise<{ id: string; displayName?: string }[]>;
 }
 
 export function createEngagementProvider(options: EngagementOptions): EngagementProvider {
@@ -188,13 +196,42 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
     // Adoption
     // -----------------------------------------------------------------------
 
+    /**
+     * The full rows, not a count.
+     *
+     * Everything a reader deciding whether to adopt something wants is already here —
+     * which project, which team, what stage, since when, and whether the rollout
+     * finished — so the only thing worth adding is the adopter's name, resolved once
+     * for the whole list rather than per row.
+     */
     async listAdoptions(solutionId) {
       const rows = await fetchAll<Cycai_adoptions>(
         (o) => Cycai_adoptionsService.getAll(o),
         "list adoptions",
         { filter: `cycai_solutionid eq ${Number(solutionId)}`, orderBy: ["cycai_startedon desc"] },
       );
-      return rows.map(toAdoption);
+
+      const adoptions = rows.map(toAdoption);
+      const unresolved = [...new Set(adoptions.map((row) => row.startedBy).filter(Boolean))];
+      if (!options.resolveUsers || unresolved.length === 0) return adoptions;
+
+      // Best-effort: an unresolved adopter keeps the GUID and the UI falls back,
+      // rather than the adoption list failing over a name.
+      let names = new Map<string, string>();
+      try {
+        names = new Map(
+          (await options.resolveUsers(unresolved))
+            .filter((user) => user.displayName)
+            .map((user) => [guid(user.id).toLowerCase(), user.displayName!]),
+        );
+      } catch {
+        return adoptions;
+      }
+
+      return adoptions.map((row) => ({
+        ...row,
+        startedByName: names.get(guid(row.startedBy).toLowerCase()) ?? null,
+      }));
     },
 
     async startAdoption(solutionId, input: StartAdoptionInput) {

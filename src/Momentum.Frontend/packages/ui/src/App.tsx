@@ -10,11 +10,11 @@ import type {
   ContributionKind,
   DiscoveryItem,
   DiscoveryScope,
-  MomentumItem,
   Request,
   RequestSummary,
   Solution,
   SolutionSummary,
+  SolutionUse,
   View,
 } from "./types";
 import { useApi } from "./Hooks/useApi";
@@ -28,6 +28,7 @@ import { SolutionPanel } from "./Components/SolutionPanel/SolutionPanel";
 import { Home } from "./Pages/Home/Home";
 import { MyWork } from "./Pages/MyWork/MyWork";
 import { Approvals } from "./Pages/Approvals/Approvals";
+import { Dashboard } from "./Pages/Dashboard/Dashboard";
 import { ContributeModal } from "./Components/ContributeModal/ContributeModal";
 import { Discovery as DiscoveryView } from "./Pages/Discovery/Discovery";
 
@@ -51,6 +52,7 @@ export function App(): React.ReactElement {
   const [linkedNeeds, setLinkedNeeds] = useState<Request[]>([]);
   const [solutionComments, setSolutionComments] = useState<Comment[]>([]);
   const [solutionActivity, setSolutionActivity] = useState<ActivityRecord[]>([]);
+  const [solutionAdoptions, setSolutionAdoptions] = useState<SolutionUse[]>([]);
   const [solutionAdoptionOpen, setSolutionAdoptionOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -143,10 +145,13 @@ export function App(): React.ReactElement {
     setSelected(null);
     setSelectedSolution(solution);
     try {
-      const [nextNeeds, nextComments, nextActivity] = await Promise.allSettled([
+      const [nextNeeds, nextComments, nextActivity, nextAdoptions] = await Promise.allSettled([
         api<Request[]>(`/api/solutions/${solution.id}/requests`),
         api<Comment[]>(`/api/solutions/${solution.id}/comments`),
         api<ActivityRecord[]>(`/api/solutions/${solution.id}/activity`),
+        // Who is using it, not how many. The rows carry project, team, stage and
+        // dates; the summary reduced all of that to a count before it was ever shown.
+        api<SolutionUse[]>(`/api/solutions/${solution.id}/use`),
       ]);
       if (nextNeeds.status === "fulfilled") setLinkedNeeds(nextNeeds.value);
       else setError(errorText(nextNeeds.reason));
@@ -154,6 +159,8 @@ export function App(): React.ReactElement {
       else setError(errorText(nextComments.reason));
       if (nextActivity.status === "fulfilled") setSolutionActivity(nextActivity.value);
       else setError(errorText(nextActivity.reason));
+      // Degrades to the counts alone rather than banner-ing the panel.
+      setSolutionAdoptions(nextAdoptions.status === "fulfilled" ? nextAdoptions.value : []);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -177,26 +184,6 @@ export function App(): React.ReactElement {
       await openRequest(detail);
     } catch (reason) {
       setError(errorText(reason));
-    }
-  }
-
-  async function openMomentum(item: MomentumItem) {
-    if (!item.itemId) {
-      setError("That item is missing an id, so it could not be opened.");
-      return;
-    }
-    const source = isSolutionItem(item.itemType) ? "solutions" : "requests";
-    try {
-      if (isSolutionItem(item.itemType)) {
-        const solution = await api<Solution>(`/api/${source}/${item.itemId}`);
-        await openSolution(solution);
-        return;
-      }
-      const detail = await api<Request>(`/api/${source}/${item.itemId}`);
-      await openRequest(detail);
-    } catch (reason) {
-      setError(errorText(reason));
-      void runSearch();
     }
   }
 
@@ -239,11 +226,12 @@ export function App(): React.ReactElement {
         userInitials={userInitials}
         role={role}
         onMyWork={() => setView("requests")}
-        canGovern={canGovern}
-        approvalsCount={approvals.pendingCount || workspace.state.inbox.length}
-        // Keeps the count badge as a signal, but the queue itself now lives on
-        // "Your work" — there is no separate approvals destination to send them to.
-        onApprovals={() => setView("requests")}
+        onDashboard={() => setView("dashboard")}
+        // Only a reviewer has a queue, so for everyone else this is zero and the
+        // badge and its pip are simply absent.
+        pendingCount={
+          canGovern ? approvals.pendingCount || workspace.state.inbox.length : 0
+        }
         onSignOut={() => {
           window.location.href = "/api/auth/logout";
         }}
@@ -294,8 +282,6 @@ export function App(): React.ReactElement {
               setSolutionAdoptionOpen(true);
               void openDiscovery({ ...item, kind: "Solution", source: "solution" });
             }}
-            momentum={workspace.state.momentum}
-            onOpenMomentum={(item) => void openMomentum(item)}
             onOpenApprovals={canGovern ? () => setView("requests") : undefined}
           />
         )}
@@ -335,6 +321,7 @@ export function App(): React.ReactElement {
             }
           />
         )}
+        {view === "dashboard" && <Dashboard />}
         {view === "search" && (
           <DiscoveryView
             query={query}
@@ -394,6 +381,7 @@ export function App(): React.ReactElement {
           linkedNeeds={linkedNeeds}
           comments={solutionComments}
           activity={solutionActivity}
+          adoptions={solutionAdoptions}
           solutionSummary={workspace.state.solutionSummary}
           requestSummary={workspace.state.requestSummary}
           role={role}

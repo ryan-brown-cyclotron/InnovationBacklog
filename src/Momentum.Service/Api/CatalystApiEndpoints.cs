@@ -689,6 +689,210 @@ public static class CatalystApiEndpoints
             return Results.Ok(summary);
         });
 
+        /*
+         * Programme-level numbers for the dashboard.
+         *
+         * Computed live from the repositories, for the same reason the engagement
+         * summaries above are: there is no rollup table, and a cache nobody
+         * invalidates is worse than no cache. Everything is visibility-filtered
+         * first, so two people can legitimately see different totals — a dashboard
+         * that leaked the count of items you cannot see would leak that they exist.
+         *
+         * The code app computes the same shape from Azure DevOps work items and
+         * Dataverse rows. Where the two hosts cannot measure a figure the same way
+         * they say so in `Source` rather than quietly differing.
+         */
+        api.MapGet("/insights", async (
+            IIdentityProvider identity,
+            IRequestRepository requests,
+            ISolutionRepository solutions,
+            IRequestSolutionRepository relationships,
+            IAcceptanceDecisionRepository decisions,
+            ICommentRepository comments,
+            IVoteRepository votes,
+            ISolutionUseRepository uses,
+            IContributionRepository contributions,
+            IAuditRepository auditLog) =>
+        {
+            const int staleAfterDays = 21;
+            var now = DateTimeOffset.UtcNow;
+            var windowStart = now.AddDays(-30);
+            var priorStart = now.AddDays(-60);
+
+            var userId = await identity.GetCurrentUserId();
+            var role = await identity.GetCurrentUserRole();
+
+            var allRequests = (await AllRequests(requests))
+                .Where(r => ItemVisibilityRules.CanSee(r.Visibility, role, r.SubmittedBy == userId))
+                .ToList();
+            var allSolutions = await FilterVisibleSolutions(
+                identity, await solutions.Search(string.Empty, 0, 500));
+            // Same rule the activity feed uses: a dashboard that counted items you
+            // cannot see would leak the fact that they exist.
+            var visibleSubjects = allRequests.Select(item => item.Id)
+                .Concat(allSolutions.Select(item => item.Id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // --------------------------------------------------------- ideas
+            var submitted30d = allRequests.Count(r => r.CreatedAt >= windowStart);
+            var submittedPrior30d = allRequests.Count(
+                r => r.CreatedAt >= priorStart && r.CreatedAt < windowStart);
+            var awaiting = allRequests.Where(r => r.Status == RequestStatus.AwaitingApproval).ToList();
+            var approved = allRequests.Count(r => r.Status == RequestStatus.Accepted);
+            var stale = awaiting.Count(r => (now - r.CreatedAt).TotalDays > staleAfterDays);
+
+            // ----------------------------------------------- approval durations
+            // Exact here, unlike the code app: the decision record carries the moment
+            // it was made, so no revision history or audit row has to stand in for it.
+            var durations = new List<double>();
+            var linkedIdeas = 0;
+            foreach (var request in allRequests)
+            {
+                var settled = (await decisions.GetByRequest(request.Id))
+                    .OrderBy(d => d.DecidedAt)
+                    .FirstOrDefault();
+                if (settled is not null && settled.DecidedAt >= request.CreatedAt)
+                    durations.Add((settled.DecidedAt - request.CreatedAt).TotalDays);
+
+                var links = await VisibleLinks(identity, await relationships.GetByRequest(request.Id));
+                if (links.Count > 0) linkedIdeas++;
+            }
+            durations.Sort();
+
+            // --------------------------------------------------------- votes
+            var perVoter = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var votes30d = 0;
+            var totalVotes = 0;
+            var comments30d = 0;
+            foreach (var target in allRequests
+                .Select(r => HubItemReference.ForRequest(r.Id))
+                .Concat(allSolutions.Select(s => HubItemReference.ForSolution(s.Id))))
+            {
+                foreach (var vote in await votes.GetByTarget(target))
+                {
+                    totalVotes++;
+                    if (vote.CreatedAt >= windowStart) votes30d++;
+                    var key = vote.UserId.Value;
+                    perVoter[key] = perVoter.TryGetValue(key, out var count) ? count + 1 : 1;
+                }
+
+                var subjectType = target.ItemType;
+                var discussion = await comments.GetBySubject(
+                    target.ItemId, subjectType, CommentAudienceFilter.ForRole(role));
+                comments30d += discussion.Count(c => c.CreatedAt >= windowStart);
+            }
+
+            var ranked = perVoter.Values.OrderByDescending(count => count).ToList();
+            var attributed = ranked.Sum();
+            double? topTenShare = attributed > 0 ? (double)ranked.Take(10).Sum() / attributed : null;
+
+            // ----------------------------------------------------- adoptions
+            var adoptedSolutions = 0;
+            var adoptions30d = 0;
+            foreach (var solution in allSolutions)
+            {
+                var solutionUses = await uses.GetBySolution(solution.Id);
+                if (solutionUses.Count > 0) adoptedSolutions++;
+                adoptions30d += solutionUses.Count(use => use.StartedAt >= windowStart);
+            }
+
+            // -------------------------------------------------- participation
+            var participation = 0;
+            foreach (var status in Enum.GetValues<ContributionStatus>())
+            {
+                participation += (await contributions.GetByStatus(status))
+                    .Count(c => c.CreatedAt >= windowStart);
+            }
+
+            /*
+             * People, ranked by what they have done.
+             *
+             * From the audit records, because that is the one place every kind of
+             * contribution is attributed in the same vocabulary. Only the actions that
+             * are genuinely contribution count — a decision or a visibility change is
+             * administration, and counting it would flatter whoever administers the hub
+             * into looking like its most active participant.
+             */
+            var contributionOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["request.created"] = "ideas",
+                ["solution.created"] = "ideas",
+                ["vote.added"] = "votes",
+                ["comment.added"] = "comments",
+                ["solutionUse.started"] = "adoptions",
+                ["solutionUse.completed"] = "adoptions",
+            };
+
+            var tallies = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var record in await auditLog.GetRecent(2000))
+            {
+                if (!contributionOf.TryGetValue(record.Action, out var bucket)) continue;
+                if (!visibleSubjects.Contains(record.SubjectId)) continue;
+                var actor = record.ActorId;
+                if (string.IsNullOrWhiteSpace(actor)) continue;
+                if (!tallies.TryGetValue(actor, out var counts)) tallies[actor] = counts = new int[4];
+                counts[bucket switch
+                {
+                    "ideas" => 0,
+                    "votes" => 1,
+                    "comments" => 2,
+                    _ => 3,
+                }]++;
+            }
+
+            var contributors = tallies
+                .Select(entry => new ContributorInsightResponse(
+                    entry.Key,
+                    // Already an identity a reader can be shown; the surface names it.
+                    null,
+                    entry.Value[0],
+                    entry.Value[1],
+                    entry.Value[2],
+                    entry.Value[3],
+                    entry.Value.Sum()))
+                .OrderByDescending(entry => entry.Total)
+                .Take(8)
+                .ToList();
+
+            var funnel = new List<FunnelStageResponse>
+            {
+                new("Submitted", allRequests.Count, "Every idea you can see"),
+                new("Awaiting approval", awaiting.Count, "In AwaitingApproval"),
+                new("Approved", approved, "Accepted"),
+                new("Solution linked", linkedIdeas, "Has at least one linked solution"),
+                new("Adopted", adoptedSolutions, "Solutions with at least one adoption"),
+            };
+
+            return Results.Ok(new InsightsResponse(
+                now.ToString("O"),
+                new IdeaFlowInsightsResponse(allRequests.Count, submitted30d, submittedPrior30d),
+                new ApprovalInsightsResponse(
+                    Percentile(durations, 0.5),
+                    Percentile(durations, 0.9),
+                    durations.Count,
+                    "Submission to the recorded approval decision",
+                    stale,
+                    staleAfterDays),
+                new VoterInsightsResponse(
+                    perVoter.Count,
+                    totalVotes,
+                    // No user directory on this host. Null says so; a number would be
+                    // an invention, and voter breadth without a denominator is a lie.
+                    null,
+                    null,
+                    topTenShare),
+                new EngagementInsightsResponse(
+                    votes30d,
+                    comments30d,
+                    // Null, not zero: nothing in the UI creates a participation row,
+                    // so zero would report an unbuilt feature as an unpopular one.
+                    participation > 0 ? participation : null,
+                    adoptions30d),
+                new SolutionInsightsResponse(allSolutions.Count, adoptedSolutions),
+                funnel,
+                contributors));
+        });
+
         // Uploads arrive as base64 JSON so they travel the same client bridge as
         // every other call; the response descriptor is read back from storage.
         api.MapPost("/attachments", async (
@@ -904,6 +1108,18 @@ public static class CatalystApiEndpoints
     }
 
     /// <summary>Every request, across all statuses — the repository has no "all" port.</summary>
+    /// <summary>
+    /// Nearest-rank percentile over an ascending sample, rounded to a tenth of a day.
+    /// Null for an empty sample — a median of nothing is not zero.
+    /// </summary>
+    private static double? Percentile(IReadOnlyList<double> sorted, double fraction)
+    {
+        if (sorted.Count == 0) return null;
+        var rank = (int)Math.Ceiling(fraction * sorted.Count);
+        var index = Math.Clamp(rank - 1, 0, sorted.Count - 1);
+        return Math.Round(sorted[index], 1);
+    }
+
     private static async Task<IReadOnlyList<Request>> AllRequests(IRequestRepository requests)
     {
         var all = new List<Request>();

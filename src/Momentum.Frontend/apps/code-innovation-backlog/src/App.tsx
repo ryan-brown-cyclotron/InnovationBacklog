@@ -3,7 +3,7 @@ import { LogicProvider, useCurrentUser, useEnvironmentDesignation } from "@innov
 import type { CurrentUser } from "@innovation-backlog/logic";
 import { MomentumContextProvider } from "@momentum/sdk";
 import type { AppUser } from "@momentum/sdk";
-import { App as InnovationBacklogApp } from "@momentum/ui";
+import { App as InnovationBacklogApp, LoadingScreen } from "@momentum/ui";
 import { createCodeAppProvider } from "./provider/index.js";
 import { createCallToolService } from "./provider/callTool.js";
 import { ErrorToastBridge } from "./ErrorToastBridge.js";
@@ -46,7 +46,7 @@ function AuthenticatedApp(): React.ReactElement {
   const { data: user, loading, error } = useCurrentUser();
   const service = useMemo(() => createCallToolService(provider), []);
 
-  if (loading) return <Notice>Signing you in…</Notice>;
+  if (loading) return <LoadingScreen />;
 
   if (error || !user) {
     // Deliberately not falling through to <App/>: its signed-out branch offers a

@@ -103,6 +103,25 @@ function catalogClause(type: "idea" | "solution", canSeeUnreviewed: boolean): st
   );
 }
 
+/**
+ * Whose ideas these are.
+ *
+ * `IdeaQuery` has carried `mineOnly` and `submittedBy` all along and the WIQL builder
+ * ignored both — so `GET:requests`, which the UI calls with `mineOnly: true` to fill
+ * My Work, returned every idea in the project. The .NET route is
+ * `requests.GetBySubmitter(me)`, so the two hosts disagreed about whose work "My Work"
+ * showed.
+ *
+ * `@Me` is resolved by Azure DevOps against the caller, so the adapter does not have to
+ * know who they are — the same reason `catalogClause` uses it for the author exception.
+ */
+function submitterClause(query: IdeaQuery | undefined): string {
+  if (query?.submittedBy) {
+    return ` AND [${FIELDS.createdBy}] = '${wiqlString(query.submittedBy)}'`;
+  }
+  return query?.mineOnly ? ` AND [${FIELDS.createdBy}] = @Me` : "";
+}
+
 function tagClause(tags: string[] | undefined): string {
   if (!tags || tags.length === 0) return "";
   return ` AND (${tags.map((t) => `[${FIELDS.tags}] CONTAINS '${wiqlString(t)}'`).join(" OR ")})`;
@@ -160,6 +179,7 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
       `SELECT [${FIELDS.id}] FROM WorkItems` +
       ` WHERE [${FIELDS.workItemType}] = '${WIT.idea}'` +
       catalogClause("idea", canReview(await role())) +
+      submitterClause(query) +
       textClause(query?.search) +
       tagClause(query?.tags) +
       (query?.statuses?.length
@@ -239,6 +259,10 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
         .map(toSolution);
     },
 
+    /**
+     * Rollups span the whole catalogue, not just your own ideas — the summaries feed
+     * every list on Home, so passing no query here is deliberate.
+     */
     async getIdeaRollups(ids) {
       return rollups.ideas(ids ?? (await fetchIdeas()).map((idea) => idea.id));
     },

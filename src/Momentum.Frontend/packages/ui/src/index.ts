@@ -16,11 +16,6 @@ export type {
   DiscoveryItem,
   DiscoveryScope,
   ActivityRecord,
-  RequestProjection,
-  SolutionProjection,
-  MomentumItem,
-  MomentumActivity,
-  MomentumHome,
 } from "./types.js";
 /**
  * Presentational components: props in, callbacks out, no data access.
@@ -35,6 +30,8 @@ export type {
 export { TagList } from "./Components/TagList/TagList.js";
 export { ActivitySplit } from "./Components/ActivitySplit/ActivitySplit.js";
 export { Empty, ContextualEmpty } from "./Components/Empty/Empty.js";
+export { LoadingScreen } from "./Components/LoadingScreen/LoadingScreen.js";
+export type { LoadingScreenProps } from "./Components/LoadingScreen/LoadingScreen.js";
 export { SectionHeading } from "./Components/SectionHeading/SectionHeading.js";
 export { Status } from "./Components/Status/Status.js";
 export { PageHeader } from "./Components/PageHeader/PageHeader.js";

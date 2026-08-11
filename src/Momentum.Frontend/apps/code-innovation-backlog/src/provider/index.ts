@@ -16,9 +16,12 @@ import { createIdentityProvider } from "./dataverse/identity.js";
 import { createEngagementProvider } from "./dataverse/engagement.js";
 import { createCollaborationProvider } from "./dataverse/collaboration.js";
 import { createRollupReader } from "./dataverse/rollups.js";
+import { createInsightsProvider } from "./insights.js";
 import { createAdoClient } from "./ado/client.js";
+import { createAttachmentsApi } from "./ado/attachments.js";
 import { createCommentsApi } from "./ado/comments.js";
 import { createRoleResolver } from "./ado/role.js";
+import { createWorkItemFacts } from "./ado/workitems.js";
 import {
   createApprovalsProvider,
   createIdeasProvider,
@@ -83,18 +86,36 @@ export function createCodeAppProvider(
 
   const engagement = createEngagementProvider({
     currentUserId: identity.currentSystemUserId,
+    // Adoptions store the adopter as a Dataverse lookup, so the list needs names for
+    // GUIDs. Optional on the contract: without it the list keeps the id.
+    resolveUsers: identity.resolveUsers?.bind(identity),
   });
 
-  const rollups = createRollupReader({ currentUserId: identity.currentSystemUserId });
+  // Engagement counts are computed from the source rows, not read from a rollup
+  // table — see the note at the top of rollups.ts. Links and comment counts come from
+  // Azure DevOps, so the connector is injected rather than imported there.
+  const itemFacts = createWorkItemFacts(ado);
+  const rollups = createRollupReader({
+    currentUserId: identity.currentSystemUserId,
+    itemFacts,
+    resolveUsers: identity.resolveUsers?.bind(identity),
+  });
 
   // One client for both halves: an idea is an ADO work item joined to a Dataverse
   // engagement rollup, and neither side can answer alone.
   const items = { client: ado, rollups, role };
 
+  // Files are native ADO work item attachments. Shared between comments (which key
+  // relations to the comment they belong to) and the collaboration provider (which
+  // serves the upload and describe calls), so both see the same session cache of
+  // descriptors for files that are uploaded but not yet on an item.
+  const attachments = createAttachmentsApi(ado);
+
   const collaboration = createCollaborationProvider({
     // Comments are native ADO work item comments, injected so the Dataverse module
     // stays free of the connector.
-    comments: createCommentsApi(ado),
+    comments: createCommentsApi(ado, attachments),
+    attachments,
     // Activity stores actors as Dataverse lookups, so the feed needs names for GUIDs.
     // Optional on the contract: without it the feed keeps the id and the UI falls back.
     resolveUsers: identity.resolveUsers ?? (async () => []),
@@ -110,6 +131,15 @@ export function createCodeAppProvider(
     solutions: createSolutionsProvider(items),
     approvals: createApprovalsProvider(items),
     search: createSearch(ado, role),
+
+    // Spans both stores and belongs to neither, so it sits at the adapter root
+    // rather than inside ado/ or dataverse/.
+    insights: createInsightsProvider({
+      client: ado,
+      itemFacts,
+      // The contributors panel names people; the audit table only has their GUIDs.
+      resolveUsers: identity.resolveUsers?.bind(identity),
+    }),
   };
 
   // Outermost, so it observes the finished operation: nothing is recorded for a

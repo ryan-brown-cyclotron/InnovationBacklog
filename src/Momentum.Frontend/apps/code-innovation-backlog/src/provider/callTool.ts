@@ -73,6 +73,14 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
         });
       }
 
+      // -------------------------------------------------------------- insights
+      if (head === "insights") {
+        // A capability: absent means the host cannot compute these honestly, and the
+        // dashboard renders its unavailable state rather than a page of zeros.
+        if (!provider.insights) throw new Error("This backend has no insights.");
+        return provider.insights.get();
+      }
+
       // -------------------------------------------------------------- activity
       if (head === "activity") {
         return provider.collaboration.listActivity({ take: Number(query.get("take") ?? 50) });

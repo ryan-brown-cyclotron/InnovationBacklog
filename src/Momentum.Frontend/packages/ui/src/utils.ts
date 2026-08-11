@@ -178,8 +178,16 @@ export function upvoteCountLabel(count: number): string {
  * Audit summaries are stored evidence written for the record — including rows
  * written before this vocabulary existed — so feeds phrase themselves from the
  * stable action key rather than echoing them.
+ *
+ * `context` is the one narrow exception. For the solutionUse.* actions the summary
+ * holds the adopting TEAM and nothing else, which is the only way the phrase can say
+ * who a rollout was for. It is read through {@link adoptingTeam}, which rejects
+ * anything that does not look like a team name, so a row written before adoption
+ * recorded a team degrades to today's wording rather than to a dangling
+ * "on behalf of ".
  */
-export function activityPhrase(action: string): string {
+export function activityPhrase(action: string, context?: string): string {
+  const team = adoptingTeam(context);
   switch (action) {
     case "request.created":
       return "shared an idea";
@@ -207,12 +215,16 @@ export function activityPhrase(action: string): string {
     case "request.solutionUnlinked":
       return "unlinked a solution";
     case "solutionUse.started":
-      return "started using a solution";
+      return team
+        ? `started using a solution on behalf of the ${team} team`
+        : "started using a solution";
     case "solutionUse.updated":
     case "solutionUse.statusChanged":
-      return "updated how their team uses a solution";
+      return team
+        ? `updated how the ${team} team uses a solution`
+        : "updated how their team uses a solution";
     case "solutionUse.completed":
-      return "finished a rollout";
+      return team ? `finished a rollout for the ${team} team` : "finished a rollout";
     case "contribution.created":
       return "asked to help";
     case "contribution.accepted":
@@ -233,9 +245,48 @@ export function activityPhrase(action: string): string {
 }
 
 /**
+ * The adopting team carried in an adoption's audit summary, or undefined.
+ *
+ * Deliberately suspicious of what it is given. Every other action stores something
+ * that is not a team in `summary` — a title, a rationale, a whole comment body — and
+ * rows predate the convention entirely, so anything long or multi-line is treated as
+ * "no team" rather than pasted into a sentence. Adoption records the team only when
+ * one was supplied; a project-only adoption has no team and reads as it always did.
+ */
+export function adoptingTeam(summary: string | undefined | null): string | undefined {
+  const value = (summary ?? "").trim();
+  if (!value || value.length > 60 || /[\r\n]/.test(value)) return undefined;
+  return value;
+}
+
+/**
+ * Trailing clause for a row that names the item after the verb, so the team lands
+ * after the title: "Ryan Brown started using <b>RFP Agent</b> on behalf of the Data
+ * Platform team". Empty for every action that is not an adoption, and for adoption
+ * rows with no team — see {@link adoptingTeam}.
+ */
+export function activitySuffixForItem(action: string, context?: string): string {
+  const team = adoptingTeam(context);
+  if (!team) return "";
+  switch (action) {
+    case "solutionUse.started":
+    case "solutionUse.updated":
+    case "solutionUse.statusChanged":
+      return ` on behalf of the ${team} team`;
+    case "solutionUse.completed":
+      return ` for the ${team} team`;
+    default:
+      return "";
+  }
+}
+
+/**
  * Transitive form of {@link activityPhrase}, for rows that name the item after
  * the verb — "Rose Nakamura upvoted <b>Stop flaky tests</b>". Use
  * activityPhrase where no title follows.
+ *
+ * The team is NOT folded in here: it belongs after the title, so callers append
+ * {@link activitySuffixForItem} once they have rendered it.
  */
 export function activityVerbForItem(action: string): string {
   switch (action) {

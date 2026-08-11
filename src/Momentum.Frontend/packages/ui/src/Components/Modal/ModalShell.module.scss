@@ -452,6 +452,76 @@
   border-color: var(--success);
 }
 
+/* Who is using a solution. Deliberately not .rowList: these rows are not clickable,
+   so they must not carry its pointer cursor and hover border. */
+.adoptionList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.adoptionRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  padding: 9px 12px;
+}
+
+.adoptionMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.adoptionWho {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adoptionProject {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.adoptionMeta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.adoptionStage {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--brand-primary);
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+/* A finished rollout is the outcome the whole surface exists to show, so it reads as
+   settled rather than as one more stage in progress. */
+.adoptionStageDone {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
 .adoptForm {
   display: flex;
   flex-direction: column;

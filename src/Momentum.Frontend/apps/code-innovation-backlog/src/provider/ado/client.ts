@@ -31,6 +31,15 @@ export interface AdoClient {
   get<T>(path: string, description: string, apiVersion?: string): Promise<T>;
   post<T>(path: string, body: unknown, description: string, apiVersion?: string): Promise<T>;
   patch<T>(path: string, body: unknown, description: string, contentType?: string): Promise<T>;
+  /**
+   * A raw octet-stream POST, for the attachment upload — the one call in this app
+   * whose body is bytes rather than JSON.
+   *
+   * The connector expresses this itself: `VstsHttpRequestBodyParameters` carries an
+   * `IsBase64` flag, and the payload the UI already holds is base64, so the bytes
+   * travel unchanged and are never JSON-stringified.
+   */
+  upload<T>(path: string, contentBase64: string, description: string): Promise<T>;
 }
 
 const API_VERSION = "7.1";
@@ -51,6 +60,9 @@ export function createAdoClient(readEnv: () => Promise<EnvVars>): AdoClient {
     body?: unknown,
     contentType = "application/json",
     apiVersion = API_VERSION,
+    // Bytes, already base64. The connector decodes them and sends the raw content,
+    // so the body must NOT be stringified on the way out.
+    isBase64 = false,
   ): Promise<T> {
     const { organization, project } = await context();
 
@@ -66,7 +78,8 @@ export function createAdoClient(readEnv: () => Promise<EnvVars>): AdoClient {
         Method: method as never,
         Uri: uri,
         Headers: { "Content-Type": contentType },
-        Body: body === undefined ? undefined : JSON.stringify(body),
+        Body: body === undefined ? undefined : isBase64 ? String(body) : JSON.stringify(body),
+        ...(isBase64 ? { IsBase64: true } : {}),
       });
     } catch (cause) {
       throw classify(cause);
@@ -93,6 +106,16 @@ export function createAdoClient(readEnv: () => Promise<EnvVars>): AdoClient {
     // sending plain application/json is accepted and then silently ignored.
     patch: (path, body, description, contentType = "application/json-patch+json") =>
       send("PATCH", path, description, body, contentType),
+    upload: (path, contentBase64, description) =>
+      send(
+        "POST",
+        path,
+        description,
+        contentBase64,
+        "application/octet-stream",
+        API_VERSION,
+        true,
+      ),
   };
 }
 

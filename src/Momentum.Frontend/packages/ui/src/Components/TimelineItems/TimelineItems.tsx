@@ -7,6 +7,7 @@ import {
   actorInitials,
   actorLabel,
   activityPhrase,
+  adoptingTeam,
   formatFileSize,
   personName,
   HIDDEN_ACTIVITY_ACTIONS,
@@ -82,8 +83,17 @@ export function TimelineItems({
       });
     }
 
+    /*
+     * Oldest first, newest at the bottom.
+     *
+     * This is a conversation, and the composer sits underneath it — so a
+     * newest-first order put the reply box furthest from the message being replied
+     * to and made the thread read backwards. Reverse-chronological is right for a
+     * FEED, where the reader wants the latest and never scrolls to the beginning;
+     * it is wrong for a thread with a beginning, which this has.
+     */
     return items.sort(
-      (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
+      (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
     );
   }, [comments, activity, decisions]);
 
@@ -127,7 +137,9 @@ function CommentRow({ comment }: { comment: Comment }): React.ReactElement {
               <li key={attachment.id}>
                 <a
                   className={styles.attachment}
-                  href={`/api/attachments/${attachment.id}`}
+                  /* Where the host says the file is, and only otherwise the .NET
+                     store's own route — see the note on Attachment in types.ts. */
+                  href={attachment.url || `/api/attachments/${attachment.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -219,10 +231,36 @@ function activityText(record: ActivityRecord): string {
       return `${actor} chose the answer for this idea`;
     case "item.visibilityChanged":
       return `${actor} changed who can see this`;
+    /*
+      Adoption had no case here at all, so it fell through to the generic phrase and
+      read "started using" with nothing after it — no object, no context. On an item's
+      own timeline the solution is already the subject, hence "this" rather than
+      naming it again. The team comes from the shared helper so the timeline and the
+      feed cannot phrase the same row differently.
+    */
+    case "solutionUse.started": {
+      const team = adoptingTeam(record.summary);
+      return team
+        ? `${actor} started using this on behalf of the ${team} team`
+        : `${actor} started using this`;
+    }
+    case "solutionUse.updated":
+    case "solutionUse.statusChanged": {
+      const team = adoptingTeam(record.summary);
+      return team
+        ? `${actor} updated how the ${team} team uses this`
+        : `${actor} updated how their team uses this`;
+    }
+    case "solutionUse.completed": {
+      const team = adoptingTeam(record.summary);
+      return team
+        ? `${actor} finished rolling this out for the ${team} team`
+        : `${actor} finished rolling this out`;
+    }
     default:
       // Audit summaries are written for the record, not the reader, so the
       // shared phrase table is the fallback rather than raw summary text.
-      return `${actor} ${activityPhrase(record.action)}`;
+      return `${actor} ${activityPhrase(record.action, record.summary)}`;
   }
 }
 

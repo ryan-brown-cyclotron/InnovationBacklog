@@ -61,7 +61,7 @@ export function ActivityPane({
                     <strong>
                       {actor}{" "}
                       <span className={styles.actVerb}>
-                        {activityPhrase(record.action)}
+                        {activityPhrase(record.action, record.summary)}
                       </span>
                     </strong>
                     <span className={styles.actTime}>{relativeTime(record.occurredAt)}</span>

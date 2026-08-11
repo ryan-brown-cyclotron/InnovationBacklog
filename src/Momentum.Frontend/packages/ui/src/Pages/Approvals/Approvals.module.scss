@@ -97,6 +97,23 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  & + & {
+    margin-top: 22px;
+  }
+}
+
+// Only in the shared list, where three kinds of decision sit under one tab and the
+// cards alone do not say which is which. Spans the grid so it reads as a heading
+// rather than sitting in the first column as if it were a card.
+.groupLabel {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .card {

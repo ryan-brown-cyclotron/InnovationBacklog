@@ -11,6 +11,7 @@ import type {
   SearchResult,
   Solution,
   SolutionSummary,
+  SolutionUse,
   Visibility,
 } from "../../types";
 import { useApi } from "../../Hooks/useApi";
@@ -36,6 +37,7 @@ export function SolutionPanel({
   linkedNeeds,
   comments,
   activity,
+  adoptions = [],
   solutionSummary,
   requestSummary,
   role,
@@ -48,6 +50,8 @@ export function SolutionPanel({
   linkedNeeds: Request[];
   comments: Comment[];
   activity: ActivityRecord[];
+  /** The adoption rows themselves. Empty when the host could not read them. */
+  adoptions?: SolutionUse[];
   solutionSummary: SolutionSummary;
   requestSummary: RequestSummary;
   role: string;
@@ -72,8 +76,10 @@ export function SolutionPanel({
   }, [openAdoption]);
 
   const summary = solutionSummary[solution.id];
-  const adoptions = summary?.adoptions ?? solution.useCount ?? 0;
-  const teams = summary?.teams ?? 0;
+  // The rows are the truth when they arrived; the rollup is the fallback, and the two
+  // are computed from the same table so they cannot disagree about how many there are.
+  const adoptionCount = adoptions.length || summary?.adoptions || solution.useCount || 0;
+  const teams = summary?.teams ?? distinctTeams(adoptions);
   const stage = deriveSolutionStatus({ id: solution.id }, summary);
 
   async function addComment(draft: {
@@ -225,8 +231,7 @@ export function SolutionPanel({
             aria-label="Adoption status"
           >
             <option value="Exploring">Exploring</option>
-            <option value="Building">Building</option>
-            <option value="Integrating">Integrating</option>
+            <option value="Implementing">Implementing</option>
             <option value="Using">Using</option>
           </select>
           <div className={styles.adoptActions}>
@@ -411,14 +416,23 @@ export function SolutionPanel({
               </ul>
             </section>
           )}
-          {(adoptions > 0 || teams > 0) && (
+          {(adoptionCount > 0 || teams > 0 || adoptions.length > 0) && (
             <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Adoption</h3>
-              <p className={styles.bodyText}>
-                {teams > 0
-                  ? `Used by ${teams} team${teams === 1 ? "" : "s"}`
-                  : `${adoptions} adoption${adoptions === 1 ? "" : "s"} so far`}
-              </p>
+              <h3 className={styles.sectionTitle}>Who is using this</h3>
+              <p className={styles.sectionHint}>{adoptionHeadline(adoptionCount, teams)}</p>
+              {/*
+                The rows, not the tally. Someone deciding whether to adopt this wants
+                to see the other adopters — which team, on what, how far along, and
+                whether anyone finished — and every one of those facts was already in
+                the response that produced the number above it.
+              */}
+              {adoptions.length > 0 && (
+                <ul className={styles.adoptionList}>
+                  {adoptions.map((use) => (
+                    <AdoptionRow key={use.id} use={use} />
+                  ))}
+                </ul>
+              )}
             </section>
           )}
         </div>
@@ -442,6 +456,63 @@ export function SolutionPanel({
       </div>
     </ModalShell>
   );
+}
+
+/**
+ * One adopter.
+ *
+ * The team leads, because "who else is doing this" is the question the list answers;
+ * the project is what they are doing it on. An adoption with no team names the project
+ * in the same position rather than reading "— · Northwind RFP response", which is the
+ * same shape the rollup uses when it counts DISTINCT `team ?? projectName`.
+ */
+function AdoptionRow({ use }: { use: SolutionUse }): React.ReactElement {
+  const who = use.startedByName?.trim() || personName(use.startedBy);
+  const heading = use.team?.trim() || use.projectName || "A team";
+  const detail = use.team?.trim() && use.projectName ? use.projectName : "";
+  const settled = Boolean(use.completedAt);
+
+  return (
+    <li className={styles.adoptionRow}>
+      <div className={styles.adoptionMain}>
+        <span className={styles.adoptionWho}>
+          {heading}
+          {detail && <span className={styles.adoptionProject}> · {detail}</span>}
+        </span>
+        <span className={styles.adoptionMeta}>
+          {settled
+            ? `Rolled out ${relativeTime(use.completedAt)} · started by ${who}`
+            : `Started ${relativeTime(use.startedAt)} by ${who}`}
+        </span>
+      </div>
+      <span
+        className={`${styles.adoptionStage} ${settled ? styles.adoptionStageDone : ""}`}
+      >
+        {settled ? "Rolled out" : use.status || "Exploring"}
+      </span>
+    </li>
+  );
+}
+
+/** "Used by 3 teams · 4 adoptions", without repeating itself when they are equal. */
+function adoptionHeadline(adoptions: number, teams: number): string {
+  const uses = `${adoptions} adoption${adoptions === 1 ? "" : "s"}`;
+  if (teams <= 0) return uses;
+  const across = `${teams} team${teams === 1 ? "" : "s"}`;
+  return teams === adoptions ? `Used by ${across}` : `Used by ${across} · ${uses}`;
+}
+
+/**
+ * Distinct `team ?? projectName`, case-insensitively — the same rule the rollup uses,
+ * so a panel that fell back to counting rows itself still says the same number.
+ */
+function distinctTeams(adoptions: SolutionUse[]): number {
+  const seen = new Set<string>();
+  for (const use of adoptions) {
+    const label = (use.team || use.projectName || "").trim().toLowerCase();
+    if (label) seen.add(label);
+  }
+  return seen.size;
 }
 
 /** Host and path of a demo link, so the row stays readable. */

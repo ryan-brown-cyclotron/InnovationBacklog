@@ -36,14 +36,19 @@ export interface ApprovalsProps {
   /**
    * Which queue to show, when the host owns the tab strip.
    *
-   * Inside "Your work" there is one strip covering your submissions and the review
-   * queues together; a second strip nested under the first is the sloppiness this
+   * Inside "My Work" there is one strip covering your submissions and the review
+   * queue together; a second strip nested under the first is the sloppiness this
    * removes. Uncontrolled and self-tabbed when omitted.
+   *
+   * `"all"` is the shared list: ideas, solutions and links in one queue under a
+   * single "Approvals" tab. Splitting them into a tab each made the reviewer click
+   * through three destinations to find out that two were empty — the thing they want
+   * to know is "what is waiting on me", and that is one question.
    */
-  activeTab?: "ideas" | "solutions" | "links";
+  activeTab?: Tab;
 }
 
-type Tab = "ideas" | "solutions" | "links";
+type Tab = "ideas" | "solutions" | "links" | "all";
 
 /**
  * Everything waiting on a reviewer. Until an idea or solution is accepted it is
@@ -73,6 +78,16 @@ export function Approvals({
     { id: "links", label: "Links", count: links.length },
   ];
 
+  /*
+   * In the shared list an empty queue is simply absent — three "nothing waiting"
+   * panels stacked under one heading says the page failed to load, not that there is
+   * no work. The single empty state below covers the genuinely-empty case.
+   */
+  const combined = tab === "all";
+  const showIdeas = combined ? ideas.length > 0 : tab === "ideas";
+  const showSolutions = combined ? solutions.length > 0 : tab === "solutions";
+  const showLinks = combined ? links.length > 0 : tab === "links";
+
   return (
     <section>
       {!embedded && (
@@ -98,7 +113,15 @@ export function Approvals({
       </div>
       )}
 
-      {tab === "ideas" &&
+      {combined && busy && total === 0 && <p className={styles.loading}>Loading queue…</p>}
+      {combined && !busy && total === 0 && (
+        <ContextualEmpty
+          title="Nothing waiting on you"
+          text="Ideas, solutions and proposed links appear here until a reviewer decides on them."
+        />
+      )}
+
+      {showIdeas &&
         (busy && ideas.length === 0 ? (
           <p className={styles.loading}>Loading queue…</p>
         ) : ideas.length === 0 ? (
@@ -108,6 +131,7 @@ export function Approvals({
           />
         ) : (
           <div className={styles.cards}>
+            {combined && <h3 className={styles.groupLabel}>Ideas</h3>}
             {ideas.map((item) => (
               <article key={item.id} className={styles.card}>
                 <header className={styles.cardHeader}>
@@ -130,7 +154,7 @@ export function Approvals({
           </div>
         ))}
 
-      {tab === "solutions" &&
+      {showSolutions &&
         (busy && solutions.length === 0 ? (
           <p className={styles.loading}>Loading queue…</p>
         ) : solutions.length === 0 ? (
@@ -140,6 +164,7 @@ export function Approvals({
           />
         ) : (
           <div className={styles.cards}>
+            {combined && <h3 className={styles.groupLabel}>Solutions</h3>}
             {solutions.map((item) => (
               <article key={item.id} className={styles.card}>
                 <header className={styles.cardHeader}>
@@ -175,7 +200,7 @@ export function Approvals({
           </div>
         ))}
 
-      {tab === "links" &&
+      {showLinks &&
         (busy && links.length === 0 ? (
           <p className={styles.loading}>Loading queue…</p>
         ) : links.length === 0 ? (
@@ -185,6 +210,7 @@ export function Approvals({
           />
         ) : (
           <div className={styles.cards}>
+            {combined && <h3 className={styles.groupLabel}>Proposed links</h3>}
             {links.map((item) => (
               <article key={`${item.requestId}-${item.solutionId}`} className={styles.card}>
                 <header className={styles.cardHeader}>

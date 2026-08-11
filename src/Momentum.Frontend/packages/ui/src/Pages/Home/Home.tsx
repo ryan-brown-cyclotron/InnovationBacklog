@@ -4,8 +4,6 @@ import type {
   ActivityRecord,
   ContributionKind,
   DiscoveryItem,
-  MomentumHome,
-  MomentumItem,
   Request,
   RequestSummary,
   SearchResult,
@@ -23,7 +21,6 @@ import {
 import { useReveal } from "../../Hooks/useReveal";
 import { CommandSearch } from "../../Components/CommandSearch/CommandSearch";
 import { ActivitySplit } from "../../Components/ActivitySplit/ActivitySplit";
-import { SpotlightCard } from "../../Components/SpotlightCard/SpotlightCard";
 import { SectionHeading } from "../../Components/SectionHeading/SectionHeading";
 import { NeedGroups } from "../../Components/NeedGroups/NeedGroups";
 import { ActivityPane } from "../../Components/ActivityPane/ActivityPane";
@@ -57,8 +54,6 @@ export interface HomeProps {
   onOpenDiscovery: (item: DiscoveryItem) => void;
   onOpenSolution: (solution: Solution) => void;
   onAdoptSolution: (item: DiscoveryItem) => void;
-  momentum: MomentumHome;
-  onOpenMomentum: (item: MomentumItem) => void;
   onOpenApprovals?: () => void;
 }
 
@@ -82,8 +77,6 @@ export function Home({
   onOpenDiscovery,
   onOpenSolution,
   onAdoptSolution,
-  momentum,
-  onOpenMomentum,
   onOpenApprovals,
 }: HomeProps): React.ReactElement {
   const hour = new Date().getHours();
@@ -328,12 +321,6 @@ export function Home({
             onSeeAll={() => setPaneOpen(true)}
             onSearchTag={setQuery}
           />
-
-          {momentum.items.length > 0 && (
-            <div data-reveal>
-              <SpotlightCard items={momentum.items} onOpen={onOpenMomentum} />
-            </div>
-          )}
 
           <div data-reveal>
             <SectionHeading

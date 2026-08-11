@@ -15,9 +15,23 @@ export interface Attachment {
   fileName: string;
   contentType: string;
   length: number;
+  /**
+   * Where the file actually lives, when the host can say.
+   *
+   * The .NET host serves attachments from its own store at `/api/attachments/{id}`,
+   * so it has no url to give and the UI falls back to that route. The code app's
+   * attachments are native Azure DevOps work item attachments, which live on
+   * `dev.azure.com` and are not reachable through any route this host serves — a
+   * chip pointing at `/api/attachments/{id}` there links nowhere at all.
+   */
+  url?: string | null;
 }
 
-export type AttachmentMatchesWire = Assert<FieldsExistOn<Attachment, AttachmentResponse>>;
+// `url` is supplied by the adapter and has no wire counterpart; every other field
+// still has to exist on the generated DTO.
+export type AttachmentMatchesWire = Assert<
+  FieldsExistOnExcept<Attachment, AttachmentResponse, "url">
+>;
 
 /** Uploads travel as base64 JSON so they use the same transport as every other call. */
 export interface UploadAttachmentInput {

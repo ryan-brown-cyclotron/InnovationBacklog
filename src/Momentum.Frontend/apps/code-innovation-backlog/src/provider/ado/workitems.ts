@@ -99,6 +99,10 @@ const identity = (f: Record<string, unknown>, field: string): string => {
   return "";
 };
 
+/** A numeric system field, absent on older items rather than zero. */
+const count = (f: Record<string, unknown>, field: string): number =>
+  typeof f[field] === "number" ? (f[field] as number) : 0;
+
 /** `System.Tags` is one semicolon-delimited string, not an array. */
 export const readTags = (f: Record<string, unknown>): string[] => {
   const raw = f[FIELDS.tags];
@@ -340,6 +344,69 @@ export async function queryWorkItems(
   const byId = new Map<number, WorkItem>();
   for (const page of pages) for (const item of page.value ?? []) byId.set(item.id, item);
   return ids.map((id) => byId.get(id)).filter((item): item is WorkItem => Boolean(item));
+}
+
+/**
+ * The facts a rollup needs that only Azure DevOps can answer.
+ *
+ * Batched deliberately. Counting links or comments per item would be one connector
+ * call per item per metric, and the connector's budget is 300 calls per 60 seconds —
+ * a thirty-row list would spend it before rendering.
+ *
+ * NOTE the API trap: `workitemsbatch` rejects `fields` and `$expand` together
+ * ("The fields parameter cannot be used with the expand parameter"), which is why
+ * `queryWorkItems` above passes a projection and gets no relations. This asks for
+ * relations instead and takes all fields with them. It is a heavier payload, so it
+ * is deliberately NOT folded into the list path — only rollups pay for it.
+ */
+export interface WorkItemFacts {
+  /** Related work items. See the note in createWorkItemFacts about type filtering. */
+  linked: number;
+  /** System.CommentCount, native and not audience-filtered. */
+  comments: number;
+  /** System.CreatedBy's uniqueName, for the contributor union. */
+  submittedBy: string;
+}
+
+export function createWorkItemFacts(
+  client: AdoClient,
+): (ids: string[]) => Promise<Map<string, WorkItemFacts>> {
+  return async (ids) => {
+    const numeric = ids.map(Number).filter((id) => Number.isFinite(id));
+    const facts = new Map<string, WorkItemFacts>();
+    if (numeric.length === 0) return facts;
+
+    const chunks: number[][] = [];
+    for (let i = 0; i < numeric.length; i += 200) chunks.push(numeric.slice(i, i + 200));
+
+    const pages = await Promise.all(
+      chunks.map((chunk) =>
+        client.post<{ value?: WorkItem[] }>(
+          "_apis/wit/workitemsbatch",
+          { ids: chunk, $expand: "Relations" },
+          "fetch work item rollup facts",
+        ),
+      ),
+    );
+
+    for (const page of pages) {
+      for (const item of page.value ?? []) {
+        facts.set(String(item.id), {
+          /*
+            Every Related link this app creates joins an Idea to a Solution — the
+            Backlog Item hierarchy uses Parent, and repository/demo are Hyperlinks —
+            so counting Related links is already the linked-count. Filtering by the
+            far end's work item type would cost a second hydration to learn types
+            that cannot differ.
+          */
+          linked: relatedItems(item).ids.length,
+          comments: count(item.fields, "System.CommentCount"),
+          submittedBy: identity(item.fields, FIELDS.createdBy),
+        });
+      }
+    }
+    return facts;
+  };
 }
 
 /** A single work item with relations expanded — repository, demo and links need them. */

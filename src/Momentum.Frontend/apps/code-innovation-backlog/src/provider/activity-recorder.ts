@@ -83,6 +83,9 @@ export function withActivity(
     });
   };
 
+  /** Blank rather than whitespace: the reader treats an empty summary as "no team". */
+  const teamOf = (team: string | null | undefined): string => (team ?? "").trim();
+
   const { ideas, solutions, approvals, engagement, collaboration } = provider;
 
   return {
@@ -161,19 +164,32 @@ export function withActivity(
         note(ACTION.voteRemoved, target.itemType, target.itemId);
         return result;
       },
+      /*
+        The team is the summary for every adoption row.
+
+        StartAdoptionInput has carried `team` all along and the recorder was throwing
+        it away, which is why the feed said "started using" with no object and no
+        context. The summary is the only channel it has — the row stores an action key
+        and a subject, and neither can say who a rollout was for.
+
+        Team ONLY, never the project name. The reader phrases it as "on behalf of the
+        X team", and a project ("Northwind RFP response") is not a team. An adoption
+        with no team therefore records no summary and reads exactly as it did before,
+        which is also what every row written before this change does.
+      */
       async startAdoption(solutionId, input) {
         const result = await engagement.startAdoption(solutionId, input);
-        note(ACTION.adoptionStarted, "Solution", solutionId);
+        note(ACTION.adoptionStarted, "Solution", solutionId, teamOf(input.team ?? result.team));
         return result;
       },
       async updateAdoption(solutionId, adoptionId, patch) {
         const result = await engagement.updateAdoption(solutionId, adoptionId, patch);
-        note(ACTION.adoptionUpdated, "Solution", solutionId);
+        note(ACTION.adoptionUpdated, "Solution", solutionId, teamOf(patch.team ?? result.team));
         return result;
       },
       async completeAdoption(solutionId, adoptionId) {
         const result = await engagement.completeAdoption(solutionId, adoptionId);
-        note(ACTION.adoptionCompleted, "Solution", solutionId);
+        note(ACTION.adoptionCompleted, "Solution", solutionId, teamOf(result.team));
         return result;
       },
     },

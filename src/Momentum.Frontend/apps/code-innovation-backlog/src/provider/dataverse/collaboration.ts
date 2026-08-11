@@ -12,25 +12,28 @@ import type {
   UploadAttachmentInput,
   UserRef,
 } from "@innovation-backlog/logic";
-import { MAX_ATTACHMENT_BYTES } from "@innovation-backlog/logic";
 
 import { Cycai_activitiesService } from "../../generated/services/Cycai_activitiesService.js";
-import { AnnotationsService } from "../../generated/services/AnnotationsService.js";
 import type { Cycai_activities } from "../../generated/models/Cycai_activitiesModel.js";
 import { Cycai_activitiescycai_actortype } from "../../generated/models/Cycai_activitiesModel.js";
 import { Cycai_activitiescycai_subjecttype } from "../../generated/models/Cycai_activitiesModel.js";
 
-import { unwrap } from "../errors.js";
-import { allOf, fetchAll, guid } from "./paging.js";
+import { allOf, fetchAll } from "./paging.js";
 
 /**
- * Attachments and the activity feed, from Dataverse — plus comments, which are
+ * The activity feed, from Dataverse — plus comments and attachments, which are
  * delegated to Azure DevOps.
  *
  * Comments used to be a Dataverse table so they could carry a three-tier audience.
  * The audience is gone and so is the table: an ADO work item comment is readable by
  * anyone who can read the item, so a private tier could not be honoured, and who
  * sees a conversation is now decided by who sees the item's area path.
+ *
+ * Attachments used to be Dataverse `annotation` rows written with no `objectid`, so
+ * every upload landed attached to nothing and never reached Azure DevOps. They are
+ * now native work item attachments — see `ado/attachments.ts`. This module keeps only
+ * the activity feed, and the two Azure DevOps capabilities are injected so it stays
+ * free of the connector.
  */
 
 type ChoiceMap = Record<number, string>;
@@ -49,21 +52,21 @@ function valueOf(map: ChoiceMap, name: string): number {
   return Number(entry[0]);
 }
 
-function compact<T extends Record<string, unknown>>(record: T): T {
-  for (const key of Object.keys(record)) {
-    if (record[key] === undefined) delete record[key];
-  }
-  return record;
-}
-
 /** Comment storage, injected so this module stays free of the ADO connector. */
 export interface CommentsApi {
   list(subject: HubItemRef): Promise<Comment[]>;
-  add(subject: HubItemRef, body: string): Promise<Comment>;
+  add(subject: HubItemRef, body: string, attachmentIds?: string[]): Promise<Comment>;
+}
+
+/** File storage, likewise injected. See `ado/attachments.ts`. */
+export interface AttachmentStore {
+  upload(input: UploadAttachmentInput): Promise<Attachment>;
+  describe(id: string): Promise<Attachment | null>;
 }
 
 export interface CollaborationOptions {
   comments: CommentsApi;
+  attachments: AttachmentStore;
   /**
    * Turns actor GUIDs into names, batched for the whole page.
    *
@@ -99,65 +102,28 @@ export function createCollaborationProvider(options: CollaborationOptions): Coll
       return options.comments.list(subject);
     },
 
+    /**
+     * The attachment ids are forwarded, not dropped.
+     *
+     * They used to be parsed by `callTool`, carried on `AddCommentInput`, sent by the
+     * composer — and then ignored here, so the only thing an upload ever produced was
+     * an orphan row. The comments API turns them into work item attachments keyed to
+     * the comment it creates.
+     */
     addComment(input: AddCommentInput) {
       return options.comments.add(
         { itemType: input.subjectType, itemId: input.subjectId },
         input.body,
+        input.attachmentIds,
       );
     },
 
-    async uploadAttachment(input: UploadAttachmentInput) {
-      const length = Math.floor((input.contentBase64.length * 3) / 4);
-      if (length > MAX_ATTACHMENT_BYTES) {
-        throw new AppError(
-          `Attachment exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit.`,
-          { category: "validation" },
-        );
-      }
-
-      const created = unwrap(
-        await AnnotationsService.create(
-          compact({
-            subject: "attachment",
-            filename: input.fileName,
-            mimetype: input.contentType ?? "application/octet-stream",
-            documentbody: input.contentBase64,
-            isdocument: true,
-          }) as never,
-        ),
-        "upload attachment",
-      );
-
-      return {
-        id: (created as { annotationid: string }).annotationid,
-        fileName: input.fileName,
-        contentType: input.contentType ?? "application/octet-stream",
-        length,
-      };
+    uploadAttachment(input: UploadAttachmentInput) {
+      return options.attachments.upload(input);
     },
 
-    async getAttachment(id: string): Promise<Attachment | null> {
-      // documentbody is heavy and deliberately excluded — this is the descriptor
-      // only. Fetch the body separately when something actually downloads it.
-      const rows = await fetchAll<{
-        annotationid: string;
-        filename?: string;
-        mimetype?: string;
-        filesize?: number;
-      }>((o) => AnnotationsService.getAll(o), "get attachment", {
-        select: ["annotationid", "filename", "mimetype", "filesize"],
-        filter: `annotationid eq ${guid(id)}`,
-        top: 1,
-      });
-
-      const row = rows[0];
-      if (!row) return null;
-      return {
-        id: row.annotationid,
-        fileName: row.filename ?? "attachment",
-        contentType: row.mimetype ?? "application/octet-stream",
-        length: row.filesize ?? 0,
-      };
+    getAttachment(id: string): Promise<Attachment | null> {
+      return options.attachments.describe(id);
     },
 
     async listActivity(query?: ActivityQuery) {

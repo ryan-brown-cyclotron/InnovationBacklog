@@ -1,0 +1,169 @@
+@use "../../Styles/tokens" as *;
+
+/* The full-page wait, as opposed to `Empty`'s `.pending`, which is the wait for one
+   surface inside an app that is already on screen. This one owns the viewport, so it
+   carries the product name — it is the first thing anyone sees. */
+.screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: radial-gradient(
+    120% 90% at 50% 0%,
+    var(--brand-soft) 0%,
+    var(--bg-page) 55%,
+    var(--bg-page) 100%
+  );
+  color: var(--text-primary);
+}
+
+.stage {
+  width: min(440px, 100%);
+  text-align: center;
+}
+
+/* Ideas connecting into a network: spokes draw inward, nodes pulse, the hub breathes. */
+.graph {
+  display: block;
+  width: 180px;
+  height: 180px;
+  margin: 0 auto 34px;
+  overflow: visible;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--focus-ring);
+  stroke-width: 1.5;
+  opacity: 0;
+  stroke-dasharray: 64;
+  stroke-dashoffset: 64;
+  animation: loading-draw 3.2s ease-in-out infinite;
+}
+
+.edge:nth-of-type(2) { animation-delay: 0.25s; }
+.edge:nth-of-type(3) { animation-delay: 0.5s; }
+.edge:nth-of-type(4) { animation-delay: 0.75s; }
+.edge:nth-of-type(5) { animation-delay: 1s; }
+.edge:nth-of-type(6) { animation-delay: 1.25s; }
+
+@keyframes loading-draw {
+  0% { stroke-dashoffset: 64; opacity: 0; }
+  22% { opacity: 0.9; }
+  55% { stroke-dashoffset: 0; opacity: 0.9; }
+  85% { stroke-dashoffset: 0; opacity: 0; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+.node {
+  fill: var(--brand-hover);
+  animation: loading-pulse 3.2s ease-in-out infinite;
+}
+
+.node:nth-of-type(2) { animation-delay: 0.3s; }
+.node:nth-of-type(3) { animation-delay: 0.6s; }
+.node:nth-of-type(4) { animation-delay: 0.9s; }
+.node:nth-of-type(5) { animation-delay: 1.2s; }
+.node:nth-of-type(6) { animation-delay: 1.5s; }
+
+@keyframes loading-pulse {
+  0%, 100% { r: 4; opacity: 0.35; }
+  50% { r: 6; opacity: 1; }
+}
+
+.core {
+  fill: none;
+  stroke: var(--brand-hover);
+  stroke-width: 2;
+  stroke-dasharray: 6 10;
+  opacity: 0.5;
+  transform-origin: 90px 90px;
+  animation: loading-spin 9s linear infinite;
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+.hub {
+  fill: var(--brand-hover);
+  transform-origin: 90px 90px;
+  animation: loading-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes loading-breathe {
+  0%, 100% { transform: scale(0.88); opacity: 0.85; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+.title {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 5vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.message {
+  margin: 0 0 28px;
+  min-height: 22px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  animation: loading-fade 4s ease-in-out infinite;
+}
+
+@keyframes loading-fade {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.bar {
+  height: 3px;
+  width: 100%;
+  border-radius: 99px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  width: 38%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--focus-ring), var(--brand-hover));
+  animation: loading-slide 1.6s cubic-bezier(0.65, 0.05, 0.36, 1) infinite;
+}
+
+@keyframes loading-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(300%); }
+}
+
+/* The whole illustration is decoration — the heading and the status line carry the
+   meaning, so stopping every animation loses nothing. The graph is frozen fully drawn
+   rather than mid-stroke, and the bar fills rather than sitting at 38%, which would
+   read as stalled progress. */
+@media (prefers-reduced-motion: reduce) {
+  .edge,
+  .node,
+  .core,
+  .hub,
+  .message,
+  .bar span {
+    animation: none;
+  }
+
+  .edge {
+    opacity: 0.6;
+    stroke-dashoffset: 0;
+  }
+
+  .node,
+  .message {
+    opacity: 1;
+  }
+
+  .bar span {
+    width: 100%;
+  }
+}

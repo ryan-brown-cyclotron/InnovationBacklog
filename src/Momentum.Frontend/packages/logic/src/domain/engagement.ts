@@ -1,5 +1,5 @@
 import type { SolutionUseResponse, VoteSummaryResponse } from "@momentum/contracts";
-import type { Assert, FieldsExistOn } from "./common.js";
+import type { Assert, FieldsExistOn, FieldsExistOnExcept } from "./common.js";
 import type { AdoptionStatus, HubItemType, ParticipationStatus } from "./enums.js";
 
 /** Points an engagement record at either side of the hub. */
@@ -48,6 +48,15 @@ export interface Adoption {
   id: string;
   solutionId: string;
   startedBy: string;
+  /**
+   * The adopter's display name, when the backing store can resolve it.
+   *
+   * `startedBy` is whatever the store keys on, and for Dataverse that is a
+   * systemuser GUID — which renders as "Someone" everywhere a name is expected.
+   * Optional, exactly like `ActivityEntry.actorName`: hosts whose key is already an
+   * identity (the .NET side stores a UserId) omit it and callers fall back.
+   */
+  startedByName?: string | null;
   projectName: string;
   team: string | null;
   status: AdoptionStatus;
@@ -56,7 +65,11 @@ export interface Adoption {
   completedAt: string | null;
 }
 
-export type AdoptionMatchesWire = Assert<FieldsExistOn<Adoption, SolutionUseResponse>>;
+// startedByName is resolved by the adapter and has no wire counterpart; every other
+// field still has to exist on the generated DTO.
+export type AdoptionMatchesWire = Assert<
+  FieldsExistOnExcept<Adoption, SolutionUseResponse, "startedByName">
+>;
 
 export interface StartAdoptionInput {
   projectName: string;

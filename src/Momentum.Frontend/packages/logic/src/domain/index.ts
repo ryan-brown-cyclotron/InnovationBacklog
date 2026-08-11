@@ -6,3 +6,4 @@ export * from "./engagement.js";
 export * from "./collaboration.js";
 export * from "./identity.js";
 export * from "./search.js";
+export * from "./insights.js";

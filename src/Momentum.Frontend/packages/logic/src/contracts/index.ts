@@ -5,4 +5,5 @@ export type { CollaborationProvider } from "./collaboration-provider.js";
 export type { ApprovalsProvider, ApprovalInbox, Decision } from "./approvals-provider.js";
 export type { IdentityProvider } from "./identity-provider.js";
 export type { EnvironmentProvider } from "./environment-provider.js";
+export type { InsightsProvider } from "./insights-provider.js";
 export type { InnovationBacklogProvider } from "./provider.js";

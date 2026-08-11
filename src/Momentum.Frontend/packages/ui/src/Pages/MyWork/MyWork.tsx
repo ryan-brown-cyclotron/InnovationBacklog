@@ -29,8 +29,9 @@ export interface MyWorkProps {
   loading?: boolean;
 }
 
-type ApprovalTab = "ideas" | "solutions" | "links";
-type Tab = "yours" | ApprovalTab;
+/** The embedded queue's own vocabulary. Only the shared list is used from here. */
+type ApprovalTab = "ideas" | "solutions" | "links" | "all";
+type Tab = "mine" | "approvals";
 
 export function MyWork({
   requests,
@@ -53,49 +54,33 @@ export function MyWork({
     (item) => !attention.includes(item) && !completed.includes(item),
   );
 
-  /*
-   * One strip, yours first.
-   *
-   * The review queue used to render above the work groups with its own tab strip, so
-   * the page stacked two unrelated lists and two rows of tabs with nothing saying
-   * where one ended and the other began. These are peers — things that want your
-   * attention — so they are peers in the navigation too.
-   */
-  const [tab, setTab] = React.useState<Tab>("yours");
-  const tabs: { id: Tab; label: string; count: number }[] = [
-    { id: "yours", label: "Yours", count: requests.length },
-    ...(approvals
-      ? [
-          { id: "ideas" as const, label: "Ideas", count: approvals.ideas },
-          { id: "solutions" as const, label: "Solutions", count: approvals.solutions },
-          /*
-           * Only when something is actually pending.
-           *
-           * Ideas and solutions keep their tab while empty because "no ideas waiting"
-           * is real news. A proposed link is not: on hosts where only a reviewer can
-           * link a solution to an idea, the person creating it is the person who would
-           * approve it, so nothing is ever pending and the tab was a permanent dead
-           * end. Hosts that do queue links still get it the moment one arrives.
-           */
-          ...(approvals.links > 0
-            ? [{ id: "links" as const, label: "Links", count: approvals.links }]
-            : []),
-        ]
-      : []),
-  ];
-
-  // Reviewer status can arrive after first paint; a tab that disappears must not
-  // leave the page rendering nothing.
-  const active = tabs.some((item) => item.id === tab) ? tab : "yours";
-
   const waiting = approvals
     ? approvals.ideas + approvals.solutions + approvals.links
     : 0;
 
+  /*
+   * Two tabs, and only two: what you shared, and what is waiting on you.
+   *
+   * This used to read "Yours / Ideas / Solutions", which named the tabs after record
+   * TYPES rather than after what the reader came to do — and split one job, reviewing,
+   * across two of them. A reviewer does not think "I will go and do the solutions";
+   * they think "what needs a decision". The queue renders all three kinds in one
+   * shared list behind the second tab.
+   */
+  const [tab, setTab] = React.useState<Tab>("mine");
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    { id: "mine", label: "My Work", count: requests.length },
+    ...(approvals ? [{ id: "approvals" as const, label: "Approvals", count: waiting }] : []),
+  ];
+
+  // Reviewer status can arrive after first paint; a tab that disappears must not
+  // leave the page rendering nothing.
+  const active = tabs.some((item) => item.id === tab) ? tab : "mine";
+
   return (
     <section>
       <PageHeader
-        title="Your work"
+        title="My Work"
         detail={
           waiting > 0
             ? `${requests.length} shared · ${waiting} awaiting your decision`
@@ -120,9 +105,9 @@ export function MyWork({
         </div>
       )}
 
-      {active !== "yours" && approvals?.render(active)}
+      {active === "approvals" && approvals?.render("all")}
 
-      {active === "yours" &&
+      {active === "mine" &&
         (loading && requests.length === 0 ? (
         <Pending text="Loading your work…" />
       ) : requests.length === 0 ? (

@@ -11,7 +11,13 @@ import type {
   VoteSummaryResponse,
 } from "@momentum/sdk";
 
-export type View = "home" | "requests" | "solutions" | "search" | "approvals";
+export type View =
+  | "home"
+  | "requests"
+  | "solutions"
+  | "search"
+  | "approvals"
+  | "dashboard";
 
 export type ContributionKind = "request" | "solution";
 
@@ -19,7 +25,15 @@ export type Request = RequestResponse;
 
 export type Solution = SolutionResponse;
 
-export type Attachment = AttachmentResponse;
+/**
+ * `url` is added by the adapter, not the wire.
+ *
+ * The .NET host keeps attachments in its own store and serves them from
+ * `/api/attachments/{id}`, so it has no url to give. The code app's are native Azure
+ * DevOps work item attachments living on `dev.azure.com`, which that route cannot
+ * reach — so a host that knows where the file is says so, and the rest fall back.
+ */
+export type Attachment = AttachmentResponse & { url?: string | null };
 
 export type VoteSummary = VoteSummaryResponse;
 
@@ -31,9 +45,19 @@ export type RequestSolution = {
   addedAt: string;
 };
 
-export type SolutionUse = SolutionUseResponse;
+/**
+ * `startedByName` is added by the adapter, not the wire — see `ActivityRecord`.
+ *
+ * `startedBy` is whatever the store keys on: a UserId on the .NET side, a Dataverse
+ * systemuser GUID in the code app. A GUID has no name in it, so the host that can
+ * resolve one says so and the rest fall back to deriving it from the key.
+ */
+export type SolutionUse = SolutionUseResponse & { startedByName?: string | null };
 
-export type Comment = CommentResponse;
+/** Same as the wire, except its attachments may know where they live. */
+export type Comment = Omit<CommentResponse, "attachments"> & {
+  attachments: Attachment[];
+};
 
 export type SearchItem = SearchResponseItem;
 
@@ -97,6 +121,57 @@ export type PendingLink = {
   addedAt: string;
 };
 
+/**
+ * Programme-level figures from GET /api/insights.
+ *
+ * Declared here rather than imported, for the same reason `PendingLink` is:
+ * `InsightsResponse` exists in `Momentum.Contracts/Models.cs` and is marked for
+ * export, but TypeGen has not been re-run, so `@momentum/contracts` has no such
+ * type yet and this package would not compile. Shape mirrors the C# record.
+ * Regenerating contracts should replace this block with an import.
+ *
+ * THE NULLS ARE LOAD-BEARING. A figure a backend cannot measure is null, and the
+ * page renders that as "no data" rather than as zero — a confident zero is
+ * indistinguishable from a real one.
+ */
+export type Insights = {
+  generatedAt: string;
+  ideas: { total: number; submitted30d: number; submittedPrior30d: number };
+  approval: {
+    medianDays: number | null;
+    p90Days: number | null;
+    sampleSize: number;
+    source: string;
+    staleCount: number;
+    staleAfterDays: number;
+  };
+  voters: {
+    distinct: number;
+    totalVotes: number;
+    population: number | null;
+    populationSource: string | null;
+    topTenShare: number | null;
+  };
+  engagement30d: {
+    votes: number;
+    comments: number;
+    participation: number | null;
+    adoptions: number;
+  };
+  solutions: { total: number; adopted: number };
+  funnel: { label: string; value: number; detail?: string }[];
+  /** Ranked highest-first, already truncated by the backend. */
+  contributors: {
+    id: string;
+    name?: string | null;
+    ideas: number;
+    votes: number;
+    comments: number;
+    adoptions: number;
+    total: number;
+  }[];
+};
+
 export type ParticipationRequest = {
   id: string;
   itemType: string;
@@ -121,41 +196,13 @@ export type ParticipationRequest = {
  */
 export type ActivityRecord = ActivityResponseItem & { actorName?: string | null };
 
-export type RequestProjection = {
-  itemType: "request";
-  itemId: string;
-  title: string;
-  state: string;
-  voteCount: number;
-  useCount: number;
-  commentCount: number;
-};
+/*
+  MomentumItem / MomentumHome / the two projections used to live here, feeding
+  SpotlightCard on Home.
 
-export type SolutionProjection = {
-  itemType: "solution";
-  itemId: string;
-  title: string;
-  state: string;
-  voteCount: number;
-  useCount: number;
-  adoptedByProjects: string[];
-};
-
-export type MomentumItem = RequestProjection | SolutionProjection;
-
-export type MomentumActivity = {
-  eventId: string;
-  itemType?: string;
-  itemId?: string;
-  actorId: string;
-  actorType: string;
-  kind: string;
-  summary: string;
-  relatedItemId?: string;
-  occurredAt: string;
-};
-
-export type MomentumHome = {
-  items: MomentumItem[];
-  activity: MomentumActivity[];
-};
+  They are gone because nothing ever produced them: there is no /momentum endpoint in
+  the .NET API, no momentum route in the code app's callTool, and useWorkspace never
+  fetched one — so `momentum.items` was permanently empty and the card had never
+  rendered in either host. Its styling now lives in ActivitySplit's featured carousel,
+  which shows real solutions ranked by real engagement.
+*/

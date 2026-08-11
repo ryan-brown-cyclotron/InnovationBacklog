@@ -4,6 +4,7 @@ import type { CollaborationProvider } from "./collaboration-provider.js";
 import type { EngagementProvider } from "./engagement-provider.js";
 import type { EnvironmentProvider } from "./environment-provider.js";
 import type { IdentityProvider } from "./identity-provider.js";
+import type { InsightsProvider } from "./insights-provider.js";
 import type { IdeasProvider } from "./ideas-provider.js";
 import type { SolutionsProvider } from "./solutions-provider.js";
 
@@ -34,4 +35,12 @@ export interface InnovationBacklogProvider {
 
   /** Absent in providers with no per-environment configuration. */
   environment?: EnvironmentProvider;
+
+  /**
+   * Programme-level numbers for the dashboard.
+   *
+   * Optional because a backend that cannot compute them honestly should not: the
+   * dashboard's whole premise is that every figure on it can be traced to rows.
+   */
+  insights?: InsightsProvider;
 }

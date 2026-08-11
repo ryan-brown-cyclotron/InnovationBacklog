@@ -324,6 +324,12 @@ function SolutionRow({
   const teams = summary?.teams ?? 0;
   const adoptions = summary?.adoptions ?? solution.useCount ?? 0;
   const stage = deriveSolutionStatus({ id: solution.id }, summary);
+  const usage = {
+    teams,
+    adoptions,
+    active: summary?.activeUses ?? 0,
+    completed: summary?.completedUses ?? 0,
+  };
   return (
     <div className={styles.solutionRow}>
       <div className={styles.main}>
@@ -343,7 +349,7 @@ function SolutionRow({
         )}
         <TagList tags={solution.tags} max={4} />
       </div>
-      <UsageCell teams={teams} adoptions={adoptions} />
+      <UsageCell {...usage} />
       <div>
         <StageChip stage={stage} />
       </div>
@@ -372,9 +378,13 @@ function StandaloneSolutionRow({
   onOpen: (item: DiscoveryItem) => void;
 }): React.ReactElement {
   const summary = solutionSummary[item.itemId];
-  const teams = summary?.teams ?? item.teams ?? 0;
-  const adoptions = summary?.adoptions ?? item.adoptionCount ?? 0;
   const stage = deriveSolutionStatus({ id: item.itemId }, summary);
+  const usage = {
+    teams: summary?.teams ?? item.teams ?? 0,
+    adoptions: summary?.adoptions ?? item.adoptionCount ?? 0,
+    active: summary?.activeUses ?? 0,
+    completed: summary?.completedUses ?? 0,
+  };
   return (
     <article className={styles.group}>
       <div
@@ -409,7 +419,7 @@ function StandaloneSolutionRow({
           )}
           <TagList tags={item.tags} max={4} />
         </div>
-        <UsageCell teams={teams} adoptions={adoptions} />
+        <UsageCell {...usage} />
         <div>
           <StageChip stage={stage} />
         </div>
@@ -432,32 +442,57 @@ function StandaloneSolutionRow({
   );
 }
 
+/**
+ * Usage, said in terms of what is actually happening.
+ *
+ * "Using now" was printed under every team count regardless of what those teams were
+ * doing, so a solution three teams were still exploring and one three teams had
+ * finished rolling out read identically. The split is already in the summary —
+ * `activeUses` and `completedUses`, decided by the completion timestamp — and costs
+ * nothing extra to say. Per-adopter detail is a solution's own panel; this is a list
+ * row, and one call per row to fill it would be the N+1 this list already avoids.
+ */
 function UsageCell({
   teams,
   adoptions,
+  active,
+  completed,
 }: {
   teams: number;
   adoptions: number;
+  active: number;
+  completed: number;
 }): React.ReactElement {
+  if (teams <= 0 && adoptions <= 0) {
+    return (
+      <div className={styles.cell}>
+        <span>Not adopted yet</span>
+      </div>
+    );
+  }
+
+  const headline =
+    teams > 0
+      ? `${teams} team${teams === 1 ? "" : "s"}`
+      : `${adoptions} adoption${adoptions === 1 ? "" : "s"}`;
+
+  // Only claim a split when the rollup actually carried one; older rows report
+  // neither, and "0 rolling out" would be a statement the data does not support.
+  const detail =
+    completed > 0 && active > 0
+      ? `${active} rolling out · ${completed} rolled out`
+      : completed > 0
+        ? `${completed} rolled out`
+        : active > 0
+          ? `${active} rolling out`
+          : teams > 0
+            ? "Using now"
+            : "So far";
+
   return (
     <div className={styles.cell}>
-      {teams > 0 ? (
-        <>
-          <strong>
-            {teams} team{teams === 1 ? "" : "s"}
-          </strong>
-          <span>Using now</span>
-        </>
-      ) : adoptions > 0 ? (
-        <>
-          <strong>
-            {adoptions} adoption{adoptions === 1 ? "" : "s"}
-          </strong>
-          <span>So far</span>
-        </>
-      ) : (
-        <span>Not adopted yet</span>
-      )}
+      <strong>{headline}</strong>
+      <span>{detail}</span>
     </div>
   );
 }

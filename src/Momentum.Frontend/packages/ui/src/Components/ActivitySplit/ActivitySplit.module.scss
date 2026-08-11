@@ -1,4 +1,5 @@
 @use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
 
 .section {
   margin: 34px 0 8px;
@@ -51,6 +52,15 @@
   overflow: hidden;
 }
 
+// Anchors the inset arrows, and gives the card a floor so the panel does not
+// resize as slides of different description lengths come and go.
+.previewPanel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 340px;
+}
+
 .list {
   list-style: none;
   margin: 0;
@@ -81,6 +91,30 @@
 
   li:last-child & {
     border-bottom: 0;
+  }
+}
+
+// Only rows that have not been rendered before carry this class, so an updated
+// feed animates the arrival rather than replaying the whole list.
+.rowEnter {
+  animation: row-enter 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation-delay: var(--row-delay, 0ms);
+
+  @include reduced-motion {
+    animation: none;
+  }
+}
+
+// Downward, from above: a row that arrives at the top of the feed should read as
+// pushing the older ones down, not as rising out of them.
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -178,8 +212,25 @@
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 16px 18px;
-  height: 100%;
+  padding: 16px 18px 0;
+  flex: 1;
+  min-height: 0;
+  animation: slide-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+
+  @include reduced-motion {
+    animation: none;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .previewEyebrow {
@@ -193,7 +244,9 @@
   color: var(--text-muted);
 }
 
-.dot {
+// The status pip in the eyebrow. Named apart from the carousel .dot below, which
+// is a control rather than a mark.
+.dotMark {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -268,11 +321,29 @@
     font-weight: 700;
     color: var(--text-primary);
     line-height: 1.1;
+    // Inherited from SpotlightCard. The slide is remounted per solution, so this
+    // re-fires and the numbers land rather than silently swapping.
+    animation: count-roll 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+    @include reduced-motion {
+      animation: none;
+    }
   }
 
   span {
     font-size: 11px;
     color: var(--text-muted);
+  }
+}
+
+@keyframes count-roll {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 
@@ -317,4 +388,158 @@
     border-color: var(--brand-primary);
     color: var(--brand-text);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Carousel controls
+// ---------------------------------------------------------------------------
+
+/*
+  Inset rather than floating outside the card.
+
+  The mockup puts the arrows in the page margin, which works for a full-width card.
+  This one shares its row with the activity list, so there is no margin to put them
+  in — they sit against the panel's inner edges instead, vertically centred on the
+  card body rather than on the whole panel so they do not collide with the dots.
+*/
+.arrow {
+  position: absolute;
+  top: 46%;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+  transition:
+    opacity var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+
+  &:hover {
+    opacity: 1;
+    border-color: var(--brand-primary);
+    color: var(--brand-text);
+  }
+
+  @include focus-visible;
+}
+
+.arrowPrev {
+  left: 6px;
+}
+
+.arrowNext {
+  right: 6px;
+}
+
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0 12px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border-default);
+  cursor: pointer;
+  transition: background var(--transition-fast), width var(--transition-fast);
+
+  &:hover {
+    background: var(--border-strong);
+  }
+}
+
+.dotActive {
+  background: var(--brand-primary);
+  width: 20px;
+  border-radius: 4px;
+
+  &:hover {
+    background: var(--brand-primary);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Momentum band — inherited from SpotlightCard
+// ---------------------------------------------------------------------------
+
+/*
+  Retuned for this panel. The original was 32px of horizontal padding and a row of
+  large metrics, sized for a full-width card; at ~500px that wrapped into three
+  lines. It carries the reason and the reach instead, which is what the stat tiles
+  above cannot say.
+
+  Negative margins bleed it to the panel edges through the card's own padding.
+*/
+.momentumBand {
+  position: relative;
+  overflow: hidden;
+  margin: 12px -18px 0;
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #1a1820 0%, #2d1b4e 60%, #1a1820 100%);
+}
+
+.ambient {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 25% 50%, rgb(124 58 237 / 0.30) 0%, transparent 50%),
+    radial-gradient(ellipse at 75% 50%, rgb(167 139 250 / 0.15) 0%, transparent 45%);
+  animation: ambient-drift 8s ease-in-out infinite alternate;
+  pointer-events: none;
+
+  @include reduced-motion {
+    animation: none;
+  }
+}
+
+@keyframes ambient-drift {
+  from {
+    transform: translateX(-3%) scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateX(3%) scale(1.05);
+    opacity: 1;
+  }
+}
+
+.momentumContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.bandState {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand-soft);
+  opacity: 0.9;
+}
+
+.bandFact {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.82);
 }

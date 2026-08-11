@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useApi } from "./useApi";
-import type { Request, Solution, SearchResult, ActivityRecord, MomentumHome, RequestSummary, SolutionSummary } from "../types";
+import type { Request, Solution, SearchResult, ActivityRecord, RequestSummary, SolutionSummary } from "../types";
 import { errorText } from "../utils";
 
 export interface WorkspaceState {
@@ -9,7 +9,6 @@ export interface WorkspaceState {
   solutions: SearchResult;
   inbox: Request[];
   activity: ActivityRecord[];
-  momentum: MomentumHome;
   requestSummary: RequestSummary;
   solutionSummary: SolutionSummary;
 }
@@ -20,7 +19,6 @@ const emptyState: WorkspaceState = {
   solutions: { items: [], totalCount: 0 },
   inbox: [],
   activity: [],
-  momentum: { items: [], activity: [] },
   requestSummary: {},
   solutionSummary: {},
 };
