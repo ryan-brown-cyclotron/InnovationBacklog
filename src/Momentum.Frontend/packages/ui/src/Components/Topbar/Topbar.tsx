@@ -53,7 +53,6 @@ export function Topbar({
           busy={searchBusy}
         />
       </div>
-      <span className={styles.spacer} />
       <div className={styles.actions}>
         {/* Share is the only thing in the bar. "Your work" was here AND in the menu
             below, both going to the same page — a duplicated entry that made the bar
