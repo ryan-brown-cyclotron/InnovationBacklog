@@ -44,13 +44,15 @@ export function Topbar({
         <span className={styles.brandMark}>M</span>
         <span>Innovation Hub</span>
       </button>
-      <CommandSearch
-        query={query}
-        setQuery={setQuery}
-        onSearch={onSearch}
-        onOpenItem={onOpenItem}
-        busy={searchBusy}
-      />
+      <div className={styles.searchWrapper}>
+        <CommandSearch
+          query={query}
+          setQuery={setQuery}
+          onSearch={onSearch}
+          onOpenItem={onOpenItem}
+          busy={searchBusy}
+        />
+      </div>
       <span className={styles.spacer} />
       <div className={styles.actions}>
         {/* Share is the only thing in the bar. "Your work" was here AND in the menu
