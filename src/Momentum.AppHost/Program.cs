@@ -13,28 +13,11 @@ static void SetDefaultEnvironmentVariable(string name, string value)
     }
 }
 
-var storage = builder.AddAzureStorage("storage")
-    .RunAsEmulator(emulator => emulator.WithArgs(
-        "azurite",
-        "-l", "/data",
-        "--blobHost", "0.0.0.0",
-        "--queueHost", "0.0.0.0",
-        "--tableHost", "0.0.0.0",
-        "--skipApiVersionCheck"));
-var tables = storage.AddTables("tables");
-var queues = storage.AddQueues("queues");
-
 var service = builder.AddProject<Projects.Momentum_Service>("service")
-    .WithReference(tables)
-    .WithReference(queues)
     .WithExternalHttpEndpoints();
 
-if (IsExecutableAvailable("func"))
-{
-    builder.AddProject<Projects.Momentum_Worker>("worker")
-        .WithReference(tables)
-        .WithReference(queues);
-}
+builder.AddProject<Projects.Momentum_Mcp>("mcp")
+    .WithExternalHttpEndpoints();
 
 if (IsExecutableAvailable("pnpm"))
 {

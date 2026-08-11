@@ -7,19 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Momentum.Contracts\Momentum.Contracts.csproj" />
     <ProjectReference Include="..\Momentum.ServiceDefaults\Momentum.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\Momentum.Library\Momentum.Library.Application\Momentum.Library.Application.csproj" />
-    <ProjectReference Include="..\Momentum.Library\Momentum.Library.Runtime\Momentum.Library.Runtime.csproj" />
-    <ProjectReference Include="..\Momentum.Library\Momentum.Library.Infrastructure\Momentum.Library.Infrastructure.csproj" />
-
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
-    <PackageReference Include="Swashbuckle.AspNetCore" />
-
-    <PackageReference Include="ModelContextProtocol" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" />
-
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
   </ItemGroup>
 
   <Target Name="CopyWwwrootToOutput" AfterTargets="Build">
