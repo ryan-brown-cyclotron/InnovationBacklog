@@ -301,18 +301,11 @@ export function App(): React.ReactElement {
             onOpenApprovals={canGovern ? () => setView("requests") : undefined}
           />
         )}
-        {(view === "ideas" || view === "solutions" || view === "search") && (
+        {view === "search" && (
           <DiscoveryView
             query={query}
             results={search.results}
             onOpen={(item) => void openDiscovery(item)}
-            heading={
-              view === "ideas"
-                ? "Ideas"
-                : view === "solutions"
-                  ? "Solutions"
-                  : undefined
-            }
           />
         )}
         {view === "people" && (

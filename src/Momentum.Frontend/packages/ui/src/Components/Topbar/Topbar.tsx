@@ -3,13 +3,6 @@ import type { DiscoveryItem, View } from "../../types";
 import { CommandSearch } from "../CommandSearch/CommandSearch";
 import styles from "./Topbar.module.scss";
 
-const NAV_ITEMS: { id: View; label: string }[] = [
-  { id: "home", label: "Home" },
-  { id: "ideas", label: "Ideas" },
-  { id: "solutions", label: "Solutions" },
-  { id: "people", label: "People" },
-];
-
 export function Topbar({
   view,
   onNavigate,
@@ -51,27 +44,13 @@ export function Topbar({
         <span className={styles.brandMark}>M</span>
         <span>Innovation Hub</span>
       </button>
-      <nav className={styles.nav}>
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.id}
-            className={item.id === view ? `${styles.navItem} ${styles.navItemActive}` : styles.navItem}
-            aria-current={item.id === view ? "page" : undefined}
-            onClick={() => onNavigate(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      <div className={styles.searchContainer}>
-        <CommandSearch
-          query={query}
-          setQuery={setQuery}
-          onSearch={onSearch}
-          onOpenItem={onOpenItem}
-          busy={searchBusy}
-        />
-      </div>
+      <CommandSearch
+        query={query}
+        setQuery={setQuery}
+        onSearch={onSearch}
+        onOpenItem={onOpenItem}
+        busy={searchBusy}
+      />
       <span className={styles.spacer} />
       <div className={styles.actions}>
         {/* Share is the only thing in the bar. "Your work" was here AND in the menu
