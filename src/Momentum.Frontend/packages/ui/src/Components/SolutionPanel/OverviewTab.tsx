@@ -1,13 +1,15 @@
 import type React from "react";
 import type { Milestone, MilestoneStatus } from "@innovation-backlog/logic";
-import styles from "./SolutionPanel.module.scss";
-import type { Request, RequestSummary, Solution } from "../../types";
-import { DescriptionEditor } from "./DescriptionEditor";
-import { GlanceStats } from "./GlanceStats";
-import { LinkedIdeas } from "./LinkedIdeas";
+import styles from "./styles";
+import type { Request, RequestSummary, SearchResult, Solution } from "../../types";
+import { DescriptionEditor } from "../DetailPanel/DescriptionEditor";
+import { GlanceStats } from "../DetailPanel/GlanceStats";
+import { LinkedItems } from "../DetailPanel/LinkedItems";
 import { ResourceLinks } from "./ResourceLinks";
 import { RoadmapTimeline } from "./RoadmapTimeline";
-import { TagEditor } from "./TagEditor";
+import { TagEditor } from "../TagEditor/TagEditor";
+import { useApi } from "../../Hooks/useApi";
+import { isIdeaItem, upvoteCountLabel } from "../../utils";
 
 /**
  * What the solution is, laid out so substance leads.
@@ -50,6 +52,8 @@ export function OverviewTab({
   ) => Promise<void>;
   onDeleteMilestone: (id: string) => Promise<void>;
 }): React.ReactElement {
+  const api = useApi();
+
   return (
     <div className={styles.overview}>
       <div className={styles.overviewMain}>
@@ -75,10 +79,34 @@ export function OverviewTab({
       <div className={styles.overviewSide}>
         <ResourceLinks solution={solution} />
 
-        <LinkedIdeas
-          linkedNeeds={linkedNeeds}
-          requestSummary={requestSummary}
-          onOpenRequest={onOpenRequest}
+        <LinkedItems
+          title="Ideas this supports"
+          addLabel="+ Connect"
+          emptyText="This solution is not connected to an idea yet."
+          searchLabel="Search ideas to connect…"
+          noResultsText="No ideas found."
+          removeVerb="Disconnect"
+          items={linkedNeeds.map((need) => ({
+            id: need.id,
+            title: need.title,
+            meta: requestSummary[need.id]?.votes
+              ? upvoteCountLabel(requestSummary[need.id]!.votes)
+              : "No upvotes yet",
+          }))}
+          // /api/search spans everyone's ideas; /api/requests is only your own.
+          search={async (query) => {
+            const result = await api<SearchResult>(
+              `/api/search?query=${encodeURIComponent(query)}&take=10`,
+            );
+            const linked = new Set(linkedNeeds.map((need) => need.id));
+            return result.items.filter(
+              (item) => isIdeaItem(item.itemType) && !linked.has(item.itemId),
+            );
+          }}
+          onOpen={(id) => {
+            const need = linkedNeeds.find((each) => each.id === id);
+            if (need) onOpenRequest(need);
+          }}
           onLink={onLinkIdea}
           onUnlink={onUnlinkIdea}
         />

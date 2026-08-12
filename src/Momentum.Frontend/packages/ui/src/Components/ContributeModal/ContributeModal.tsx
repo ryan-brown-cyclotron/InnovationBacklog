@@ -4,11 +4,12 @@ import styles from "./ContributeModal.module.scss";
 import type { ContributionKind } from "../../types";
 import { useApi } from "../../Hooks/useApi";
 import {
-  parseTags,
-  SOLUTION_KINDS,
+  INTAKE_SOLUTION_KINDS,
+  normalizeTags,
   solutionKindSpec,
   type SolutionKind,
 } from "@innovation-backlog/logic";
+import { TagField } from "../TagEditor/TagEditor";
 import { errorText } from "../../utils";
 
 /**
@@ -25,7 +26,16 @@ export function ContributeModal({
   onCreated: () => Promise<void>;
 }): React.ReactElement {
   const [kind, setKind] = useState<ContributionKind | null>(initialKind);
-  const [solutionKind, setSolutionKind] = useState<SolutionKind>(SOLUTION_KINDS[0]!.id);
+  const [solutionKind, setSolutionKind] = useState<SolutionKind>(
+    INTAKE_SOLUTION_KINDS[0]!.id,
+  );
+  /*
+    Tags are React state rather than a form field. They are pills, and a pill has no
+    `name` for FormData to read — which is the trade: the reader gets to see the cap
+    and remove one tag without editing a string, and this file gives up reading them
+    off the submit event.
+  */
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const api = useApi();
@@ -50,10 +60,11 @@ export function ContributeModal({
     setBusy(true);
     setError(null);
     const data = new FormData(event.currentTarget);
-    // Comma-separated in. Normalized HERE, not server-side: the only host that
-    // exists writes System.Tags straight through, so a cap the client does not
-    // apply is a cap nothing applies.
-    const tags = parseTags(String(data.get("tags") ?? ""));
+    // Already normalized on every edit by TagField; normalized again because this is
+    // the last point before the wire and the only host that exists writes
+    // System.Tags straight through — a cap the client does not apply is a cap
+    // nothing applies. Idempotent, so the second pass costs nothing.
+    const submittedTags = normalizeTags(tags);
     try {
       if (kind === "solution") {
         const demoUrl = String(data.get("demoUrl") ?? "").trim();
@@ -70,7 +81,7 @@ export function ContributeModal({
             repositoryName: needsRepository ? String(data.get("repositoryName")) : undefined,
             repositoryUrl: needsRepository ? repositoryUrl : undefined,
             demoUrl: demoUrl || undefined,
-            tags,
+            tags: submittedTags,
           }),
         });
       } else {
@@ -80,7 +91,7 @@ export function ContributeModal({
             title: String(data.get("title")),
             description: String(data.get("description")),
             type: "Backlog",
-            tags,
+            tags: submittedTags,
           }),
         });
       }
@@ -183,37 +194,51 @@ export function ContributeModal({
                   : "What is it, who is affected, and why does it matter?"}
                 <textarea name="description" required rows={6} />
               </label>
-              <label>
-                Tags <span className={styles.optional}>optional</span>
-                <input
-                  name="tags"
-                  maxLength={200}
-                  placeholder="Comma separated — e.g. Azure, Developer Experience, CI/CD"
-                />
-              </label>
+              {/*
+                A div, not a label: the row holds several controls (a remove button
+                per pill, plus the add-input), and a label wrapping more than one is
+                a label pointing at whichever the browser picks first. `htmlFor`
+                names the input explicitly instead.
+              */}
+              <div className={styles.field}>
+                <label htmlFor="contribute-tags">
+                  Tags <span className={styles.optional}>optional</span>
+                </label>
+                <TagField inputId="contribute-tags" tags={tags} onChange={setTags} />
+              </div>
               {isSolution && (
                 <>
-                  {/* The kind decides what the rest of the form asks for, so it is
-                      chosen first. A strategy has no repository; asking for one and
-                      then ignoring it is how forms end up full of placeholder URLs. */}
-                  <fieldset className={styles.kindChoice}>
-                    <legend>What kind of solution is this?</legend>
-                    {SOLUTION_KINDS.map((spec) => (
-                      <label key={spec.id} className={styles.kindOption}>
-                        <input
-                          type="radio"
-                          name="solutionType"
-                          value={spec.id}
-                          checked={solutionKind === spec.id}
-                          onChange={() => setSolutionKind(spec.id)}
-                        />
-                        <span>
-                          <strong>{spec.label}</strong>
-                          <small>{spec.description}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </fieldset>
+                  {/*
+                    The kind decides what the rest of the form asks for, so it is
+                    chosen first. A strategy has no repository; asking for one and
+                    then ignoring it is how forms end up full of placeholder URLs.
+
+                    A select, not the cards this used to render. The cards spent a
+                    third of a five-field form on one field to show a sentence of
+                    guidance — so the guidance stays, under the chosen option, and
+                    the field costs one row. It comes from the same
+                    `SolutionKindSpec.description` the cards read.
+
+                    INTAKE_SOLUTION_KINDS, never SOLUTION_KINDS: `Skill` is modelled
+                    and provisioned but not offered here yet.
+                  */}
+                  <label>
+                    What kind of solution is this?
+                    <select
+                      name="solutionType"
+                      value={solutionKind}
+                      onChange={(event) =>
+                        setSolutionKind(event.target.value as SolutionKind)
+                      }
+                    >
+                      {INTAKE_SOLUTION_KINDS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <small className={styles.kindHint}>{spec.description}</small>
+                  </label>
 
                   <div className={styles.repositoryFields}>
                     {needsRepository && (

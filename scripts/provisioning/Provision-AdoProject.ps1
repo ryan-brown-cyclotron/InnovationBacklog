@@ -4,8 +4,10 @@
     Provisions the Azure DevOps project that hosts the Innovation Backlog.
 .DESCRIPTION
     Creates the project on the inherited process produced by Provision-AdoProcess.ps1,
-    then the three visibility area paths and the Approvers group, and restricts the
-    area paths so ItemVisibility is enforced by Azure DevOps rather than by the client.
+    then the three visibility area paths and the Approvers group, restricts the area
+    paths so ItemVisibility is enforced by Azure DevOps rather than by the client, and
+    creates the shared queries that are the only view of the Solution hierarchy the
+    product can render.
 
     Idempotent: every Ensure-* helper reads before it writes.
 
@@ -26,6 +28,10 @@
 .PARAMETER SkipAreaPathSecurity
     Create the area paths but leave their permissions inherited. Use this if you want
     to review the ACL changes before applying them.
+.PARAMETER SkipQueries
+    Leave Shared Queries untouched.
+.PARAMETER QueryFolderName
+    Folder created under Shared Queries to hold them.
 .EXAMPLE
     .\Provision-AdoProject.ps1 -Organization contoso -ProcessId 3f1a... -Pat $env:AZDO_PAT
 #>
@@ -46,7 +52,16 @@ param(
     #>
     [string]$ApproverGroup = "[CyclotronInc]\Innovation Backlog Approvers",
 
-    [switch]$SkipAreaPathSecurity
+    [switch]$SkipAreaPathSecurity,
+
+    <#
+        Shared queries are the only view of the Solution hierarchy that Azure DevOps
+        can render — see the block above Ensure-Query. Skip them only when the caller
+        lacks permission to write to Shared Queries.
+    #>
+    [switch]$SkipQueries,
+
+    [string]$QueryFolderName = "Innovation Backlog"
 )
 
 $ErrorActionPreference = "Stop"
@@ -316,6 +331,162 @@ function Set-AreaPathAccess {
 }
 
 # ---------------------------------------------------------------------------
+# Shared queries
+# ---------------------------------------------------------------------------
+
+<#
+    WHY THESE EXIST AT ALL.
+
+    Backlogs and boards in Azure DevOps are driven by BEHAVIORS (backlog levels), and
+    Provision-AdoProcess.ps1 assigns one to exactly two types: Idea takes Epics and
+    Backlog Item takes the requirement level. Solution and Milestone deliberately take
+    none — a catalog entry and a promise about one are not delivery work.
+
+    The consequence is that the Solution -> Issue / Solution -> Milestone hierarchy,
+    which is real and linked with System.LinkTypes.Hierarchy-Reverse, renders NOWHERE
+    in the product's built-in surfaces. Not a backlog, not a board, not a sprint. The
+    only alternative would be to give Solution a backlog level, which is precisely the
+    trade-off that was refused for Issue: it would put catalog entries on the delivery
+    board next to real work.
+
+    Queries are indifferent to backlog levels, which makes a tree query the one
+    mechanism that can show this at all.
+
+    They are also the cheapest thing in this whole provisioning surface. A field name,
+    a work item type name and a picklist value are permanent and organization-wide; a
+    query is project-scoped, renamable, and deletable with no residue. Guessing wrong
+    here costs nothing, which is why the set below leans toward being useful rather
+    than toward being minimal.
+#>
+
+function Write-Updated { param([string]$Message) Write-Host "  Updated $Message" -ForegroundColor Yellow }
+
+<# A query path is slash-separated, and every segment here contains a space. #>
+function Get-QueryUri {
+    param(
+        [Parameter(Mandatory = $true)][string]$Project,
+        [string]$Path
+    )
+
+    $base = "https://dev.azure.com/$Organization/$([uri]::EscapeDataString($Project))/_apis/wit/queries"
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $base }
+
+    $encoded = ($Path -split "/" | ForEach-Object { [uri]::EscapeDataString($_) }) -join "/"
+    return "$base/$encoded"
+}
+
+<#
+    Runs the WIQL before storing it.
+
+    A read, and a cheap one — but the reason it is here is that a malformed query is
+    otherwise created successfully and only fails when a human opens it, by which
+    point the provisioning run has reported success. Failing at the point of
+    provisioning is the whole value of provisioning.
+#>
+function Test-Wiql {
+    param(
+        [Parameter(Mandatory = $true)][string]$Project,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Wiql
+    )
+
+    try {
+        Invoke-Ado -Method POST `
+            -Uri "https://dev.azure.com/$Organization/$([uri]::EscapeDataString($Project))/_apis/wit/wiql?`$top=1" `
+            -Body @{ query = $Wiql } | Out-Null
+    }
+    catch {
+        throw "Query '$Name' has invalid WIQL and was not created. Azure DevOps said: $_"
+    }
+}
+
+function Ensure-QueryFolder {
+    param(
+        [Parameter(Mandatory = $true)][string]$Project,
+        [Parameter(Mandatory = $true)][string]$Parent,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $existing = Invoke-Ado -Method GET -Uri (Get-QueryUri -Project $Project -Path "$Parent/$Name") -AllowNotFound
+    if ($existing) {
+        Write-Exists "query folder '$Parent/$Name'"
+        return $existing
+    }
+
+    $created = Invoke-Ado -Method POST -Uri (Get-QueryUri -Project $Project -Path $Parent) -Body @{
+        name     = $Name
+        isFolder = $true
+    }
+    Write-Created "query folder '$Parent/$Name'"
+    return $created
+}
+
+<#
+    Reconciled, not skipped, and the WIQL is OVERWRITTEN when it differs.
+
+    Unlike a picklist value — where an existing entry may already be stored on work
+    items, so removing it would strand them — nothing downstream depends on a query's
+    definition. A query is a saved question. If the question in this script and the
+    question in the organization disagree, this script is the one under review, so it
+    wins. Renaming a query by editing $Queries leaves the old one behind; that is
+    deliberate, because a name is how someone's bookmark finds it.
+#>
+function Ensure-Query {
+    param(
+        [Parameter(Mandatory = $true)][string]$Project,
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Wiql
+    )
+
+    Test-Wiql -Project $Project -Name $Name -Wiql $Wiql
+
+    $path = "$Folder/$Name"
+    # $expand=wiql, because the default projection omits it and there would be
+    # nothing to compare against.
+    $existing = Invoke-Ado -Method GET `
+        -Uri ((Get-QueryUri -Project $Project -Path $path) + "?`$expand=wiql") -AllowNotFound
+
+    if ($existing) {
+        <#
+            Azure DevOps REWRITES a stored query rather than keeping the text it was
+            given, so a raw compare reports a difference on every run and this helper
+            would PATCH five queries forever. Three transformations were observed:
+
+              whitespace   the WIQL below is a readable here-string; ADO returns one line
+              keywords     SELECT / FROM / WHERE / AND / IN / MODE come back lowercased
+              [Source].    de-bracketed to Source. in link queries (flat ones round-trip)
+
+            Case-insensitive is safe rather than lazy: WIQL keywords and field names are
+            case-insensitive to the engine, so two queries differing only in case ARE
+            the same query, and treating them as different would mean rewriting a query
+            that nobody changed.
+        #>
+        $normalize = {
+            param($text)
+            (($text -replace "\s+", " ") -replace "\[(Source|Target)\]\.", '$1.').Trim()
+        }
+        if ((& $normalize $existing.wiql) -ieq (& $normalize $Wiql)) {
+            Write-Exists "query '$path'"
+            return $existing
+        }
+
+        $updated = Invoke-Ado -Method PATCH `
+            -Uri (Get-QueryUri -Project $Project -Path $path) -Body @{ wiql = $Wiql }
+        Write-Updated "query '$path'"
+        return $updated
+    }
+
+    $created = Invoke-Ado -Method POST `
+        -Uri (Get-QueryUri -Project $Project -Path $Folder) -Body @{
+        name = $Name
+        wiql = $Wiql
+    }
+    Write-Created "query '$path'"
+    return $created
+}
+
+# ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
 
@@ -372,6 +543,88 @@ else {
         -Token (Get-AreaNodeToken -Project $ProjectName -ChildName "Hidden") `
         -AllowDescriptors @($adminsLegacy) `
         -Label "\$ProjectName\Hidden"
+}
+
+if ($SkipQueries) {
+    Write-Step "Skipping shared queries (-SkipQueries)."
+}
+else {
+    Write-Step "Ensuring shared queries..."
+    $queryFolder = "Shared Queries/$QueryFolderName"
+    Ensure-QueryFolder -Project $ProjectName -Parent "Shared Queries" -Name $QueryFolderName | Out-Null
+
+    <#
+        Ordered by what is INVISIBLE without them.
+
+        Solution and Milestone have no backlog level, so the first three exist because
+        there is otherwise no way to see those records in Azure DevOps at all. The
+        Idea tree is a convenience — Idea sits on the Epics backlog, so its Backlog
+        Item children are already reachable — and is here because it is the same
+        query with one noun changed. The last one is a net for link bugs.
+    #>
+    $queries = @(
+        @{
+            Name = "Solution tree"
+            Wiql = @"
+SELECT [System.Id], [System.WorkItemType], [System.Title], [System.State], [System.AssignedTo]
+FROM workItemLinks
+WHERE ([Source].[System.TeamProject] = @project
+        AND [Source].[System.WorkItemType] = 'Solution')
+    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+MODE (Recursive)
+"@
+        },
+        @{
+            Name = "Solutions"
+            Wiql = @"
+SELECT [System.Id], [System.Title], [System.State], [Custom.InnovationBacklogSolutionType],
+        [System.AssignedTo], [System.AreaPath], [System.Tags], [System.ChangedDate]
+FROM WorkItems
+WHERE [System.TeamProject] = @project
+    AND [System.WorkItemType] = 'Solution'
+ORDER BY [System.ChangedDate] DESC
+"@
+        },
+        @{
+            Name = "Roadmap"
+            Wiql = @"
+SELECT [System.Id], [System.Title], [System.State], [Custom.InnovationBacklogTargetLabel],
+        [Microsoft.VSTS.Scheduling.TargetDate], [System.Parent]
+FROM WorkItems
+WHERE [System.TeamProject] = @project
+    AND [System.WorkItemType] = 'Milestone'
+    AND [System.State] <> 'Cancelled'
+ORDER BY [Microsoft.VSTS.Scheduling.TargetDate] ASC
+"@
+        },
+        @{
+            Name = "Idea tree"
+            Wiql = @"
+SELECT [System.Id], [System.WorkItemType], [System.Title], [System.State], [System.AssignedTo]
+FROM workItemLinks
+WHERE ([Source].[System.TeamProject] = @project
+        AND [Source].[System.WorkItemType] = 'Idea')
+    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+MODE (Recursive)
+"@
+        },
+        @{
+            Name = "Unparented feedback"
+            Wiql = @"
+SELECT [System.Id], [System.WorkItemType], [System.Title], [System.State],
+        [System.CreatedBy], [System.CreatedDate]
+FROM workItemLinks
+WHERE ([Source].[System.TeamProject] = @project
+        AND [Source].[System.WorkItemType] IN ('Issue', 'Milestone'))
+    AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Reverse')
+MODE (DoesNotContain)
+"@
+        }
+    )
+
+    foreach ($query in $queries) {
+        Ensure-Query -Project $ProjectName -Folder $queryFolder -Name $query.Name -Wiql $query.Wiql | Out-Null
+    }
 }
 
 Write-Host ""

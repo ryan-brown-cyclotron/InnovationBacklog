@@ -254,10 +254,35 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
     },
 
     async updateIdea(id, patch: UpdateIdeaInput) {
-      const operations = [
-        patch.title !== undefined ? addField(FIELDS.title, patch.title) : null,
-        patch.description !== undefined ? addField(FIELDS.description, patch.description) : null,
-      ].filter(Boolean);
+      const operations: ReturnType<typeof addField>[] = [];
+      if (patch.title !== undefined) operations.push(addField(FIELDS.title, patch.title));
+      if (patch.description !== undefined) {
+        operations.push(addField(FIELDS.description, patch.description));
+      }
+
+      if (patch.tags !== undefined) {
+        /*
+          Read-modify-write, exactly as `updateSolution` does — and here the stakes
+          are higher. `toIdea` hands the UI `topicTags(tags)`, so the array coming
+          back has never held the `pipeline:` tag; but on an Idea that tag is what
+          `withPipeline` reads to derive the STATUS. Writing the topic tags straight
+          to System.Tags would not just lose a label, it would reset the idea's
+          pipeline stage every time somebody edited a tag.
+        */
+        const current = await getWorkItem(client, id, "read idea for update");
+        const namespaced = readTags(current.fields).filter((tag) =>
+          Object.values(TAG).some((prefix) =>
+            tag.toLowerCase().startsWith(prefix.toLowerCase()),
+          ),
+        );
+        operations.push(
+          addField(FIELDS.tags, encodeTags([...normalizeTags(patch.tags), ...namespaced])),
+        );
+      }
+
+      if (operations.length === 0) {
+        return toIdea(await getWorkItem(client, id, "read idea"));
+      }
 
       const updated = await client.patch<WorkItem>(
         `_apis/wit/workitems/${encodeURIComponent(id)}`,

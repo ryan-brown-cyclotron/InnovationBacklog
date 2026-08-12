@@ -74,10 +74,10 @@ export function VisibilityControl({
   return (
     <section className={styles.wrap}>
       <h3 className={styles.title}>
-        Who can see this
+        Manage access
         <span className={styles.adminBadge}>Admin</span>
       </h3>
-      <div className={styles.options} role="radiogroup" aria-label="Who can see this">
+      <div className={styles.options} role="radiogroup" aria-label="Manage access">
         {OPTIONS.map((option) => (
           <button
             key={option.value}

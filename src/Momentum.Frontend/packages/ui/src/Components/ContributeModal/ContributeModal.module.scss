@@ -155,8 +155,18 @@
     color: var(--text-secondary);
   }
 
-  input,
-  textarea {
+  /*
+    Direct children of a label, not every descendant input.
+
+    The tag row is a foreign component with its own small dashed "+ add tag" field,
+    and a bare `input` here outscores TagEditor.module.scss's own class — it would
+    stretch that field into a full-width form control. Every native field in this
+    form IS a direct child of its label, so the restriction costs nothing and stops
+    this rule reaching into anything it did not lay out.
+  */
+  label > input,
+  label > select,
+  label > textarea {
     border: 1px solid var(--border-default);
     border-radius: 9px;
     padding: 10px 12px;
@@ -171,9 +181,38 @@
     }
   }
 
-  textarea {
+  label > select {
+    /* Its own arrow, not the text cursor an input would show. */
+    cursor: pointer;
+  }
+
+  label > textarea {
     resize: vertical;
   }
+}
+
+/*
+  A label plus a control that is not the label's own child — currently just the tag
+  row, which holds a remove button per pill and so cannot be wrapped in one.
+*/
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  > label {
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--text-secondary);
+  }
+}
+
+/* The chosen kind's description, under the select. Was the card's `small`. */
+.kindHint {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .repositoryFields {
@@ -242,64 +281,5 @@
 
   &:disabled {
     opacity: 0.6;
-  }
-}
-
-/* Solution-kind picker. Chosen before the rest of the form because it decides
-   which fields the form asks for. */
-.kindChoice {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-
-  legend {
-    padding: 0 0 6px;
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 650;
-  }
-}
-
-.kindOption {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: 9px;
-  background: var(--bg-surface);
-  cursor: pointer;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-
-  &:hover {
-    border-color: var(--brand-primary);
-  }
-
-  /* :has keeps the selected state on the label without threading a class through
-     from the component. */
-  &:has(input:checked) {
-    border-color: var(--brand-primary);
-    background: var(--bg-accent-subtle, var(--bg-surface));
-  }
-
-  input {
-    margin-top: 3px;
-  }
-
-  strong {
-    display: block;
-    font-size: 13px;
-    font-weight: 700;
-  }
-
-  small {
-    display: block;
-    margin-top: 2px;
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.45;
   }
 }

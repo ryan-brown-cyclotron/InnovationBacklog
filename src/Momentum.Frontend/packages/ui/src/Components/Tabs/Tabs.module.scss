@@ -1,0 +1,85 @@
+@use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
+
+/*
+  Tab strip and panel, shared by every tabbed modal.
+
+  These lived in SolutionPanel.module.scss while the solution modal was the only
+  tabbed surface. The idea modal is the second, and a second copy of a tab
+  underline is how two surfaces start drifting a pixel apart.
+*/
+
+/*
+  The flex row is HERE, on the element that actually holds the buttons.
+
+  ModalShell renders `tabs` as an opaque node inside its own `.tabStrip`, so a gap
+  declared there falls between that single child and nothing — which is how the
+  strip shipped reading "OverviewActivity 10Issues 1". `.tabStrip` keeps the
+  padding, the border and the horizontal scroll; spacing belongs to whoever knows
+  where the boundaries between buttons are.
+
+  `flex: 0 0 auto` so a strip too narrow for its tabs scrolls rather than squashing
+  them — `.tabStrip` is `overflow-x: auto` and a shrinkable child would never
+  overflow it.
+*/
+.tabList {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.tab {
+  position: relative;
+  border: 0;
+  border-bottom: 2.5px solid transparent;
+  background: none;
+  padding: 14px 0 11px;
+  /* Pulls the underline onto the strip's own bottom border rather than above it. */
+  margin-bottom: -1px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+
+  &:hover {
+    color: var(--text-primary);
+  }
+
+  @include focus-visible;
+}
+
+.tabActive {
+  border-bottom-color: var(--brand-primary);
+  color: var(--text-primary);
+}
+
+.tabCount {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabActive .tabCount {
+  color: var(--brand-text);
+}
+
+/*
+  Every panel is a scroll container and carries tabIndex={0} so it is keyboard
+  reachable, which means it can take focus — and a focus ring drawn around a whole
+  scrolling pane is noise, so the ring is suppressed here and only here.
+*/
+.panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  &:focus {
+    outline: none;
+  }
+}

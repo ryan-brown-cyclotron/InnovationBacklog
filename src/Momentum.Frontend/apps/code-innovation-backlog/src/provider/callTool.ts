@@ -194,10 +194,16 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
           return setVisibility("Idea", ideaId, str(body.visibility) as ItemVisibility);
         }
 
-        if (method === "PATCH") {
+        // Guarded on `!third` for the reason spelled out on the solutions branch
+        // below: an unrecognized PATCH sub-route must not fall through to a
+        // whole-record update, and must not fall through to a read reporting success.
+        if (method === "PATCH" && !third) {
           return provider.ideas.updateIdea(ideaId, {
             title: str(body.title) || undefined,
             description: str(body.description) || undefined,
+            // NOT `str(body.tags) || undefined`: that conflates "unchanged" with
+            // "cleared", and clearing every tag is a thing people do.
+            tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
           });
         }
         return provider.ideas.getIdea(ideaId);
@@ -210,7 +216,10 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
             return provider.solutions.createSolution({
               title: str(body.title),
               description: str(body.description),
-              solutionType: (str(body.solutionType) || "Other") as SolutionKind,
+              // "Other" was the old taxonomy's catch-all and is no longer a member
+              // of SolutionKind or of the ADO picklist — a malformed call defaulting
+              // to it would have been rejected by the field it was written to.
+              solutionType: (str(body.solutionType) || "CustomSolution") as SolutionKind,
               repositoryOwner: str(body.repositoryOwner),
               repositoryName: str(body.repositoryName),
               repositoryUrl: str(body.repositoryUrl),

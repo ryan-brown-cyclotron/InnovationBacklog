@@ -9,7 +9,7 @@ public sealed record Solution
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
-    public SolutionType Type { get; init; } = SolutionType.Library;
+    public SolutionType Type { get; init; } = SolutionType.CustomSolution;
     public RepositoryReference RepositoryReference { get; init; } = null!;
 
     /// <summary>Optional link to a working demo or worked example.</summary>

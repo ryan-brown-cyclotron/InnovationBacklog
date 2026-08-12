@@ -441,6 +441,7 @@ export function App(): React.ReactElement {
           requestSummary={workspace.state.requestSummary}
           solutionSummary={workspace.state.solutionSummary}
           role={role}
+          currentUserId={user?.id ?? null}
           decisions={requestDecisions}
           onClose={() => {
             syncModalUrl("need", null);

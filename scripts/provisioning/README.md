@@ -38,13 +38,45 @@ An inherited process named **Innovation Backlog**, based on **Basic**.
 | **Idea** | Epics (renamed) | Draft → Triage → Awaiting Approval → Accepted → Published; Rejected |
 | **Backlog Item** | Issues (renamed) | inherited from Basic |
 | **Solution** | none — a catalog entry is not work | Awaiting Approval → Published → Retired; Rejected |
+| **Milestone** | none — a promise about a catalog entry is not work either | Planned → In progress → Shipped; Cancelled |
+| **Issue** (inherited, re-enabled) | Issues | To Do → Doing → Done, inherited from Basic |
 
-Plus three organization-scoped picklists, the `Custom.*` fields, and four rules per
-type (the approver gate on `System.State`, rationale-required on the decision
-transitions, and the administrator gate on `Custom.Visibility`).
+Custom fields, all of them `Custom.InnovationBacklog*`:
 
-The inherited `Epic` and `Issue` types are **disabled**, not removed — an inherited
-work item type cannot be deleted from a process.
+| Field | On | Why it is not a native field |
+|---|---|---|
+| `DecisionRationale` | Idea, Solution | A process rule can require a **field** on a state transition; it cannot require a comment. |
+| `SolutionType` | Solution | Structural — it decides whether the record has a repository at all, and the intake form is generated from it. |
+| `TargetLabel` | Milestone | A date cannot express granularity. "Q4 2026" is a quarter, "Sep 2026" a month, and no instant tells them apart. |
+
+`Milestone` also carries the **existing** organization field
+`Microsoft.VSTS.Scheduling.TargetDate`, which orders the roadmap while `TargetLabel`
+prints it. Attaching an existing field claims no new organization-wide name.
+
+`SolutionType` is picklist-backed, currently `Strategy | CustomSolution | Skill`.
+The same three values are written down in two other places — `SolutionKind` in
+`packages/logic/src/domain/enums.ts` and `SolutionType` in
+`Momentum.Library.Domain.Solutions` — and all three must agree.
+
+**`Skill` is provisioned but not offered at intake.** `SOLUTION_KINDS` marks it
+`hidden`, so the picker filters it out. The picklist value is claimed early because
+adding one is free and permanent while the field's *name and type* can never change;
+the form waits until skill intake (`Provision-SkillsRepository.ps1`,
+`SkillIntakeService`) is wired to it, because a skill's repository folder is created
+by that pipeline rather than named by whoever fills in the form.
+
+`Ensure-PickList` **reconciles** an existing list rather than skipping it, so a new
+value lands on a re-run. Additive only: values present in the organization but absent
+from the script are left alone, because work items already carry them and a picklist
+that drops one leaves those records holding a value their own field rejects.
+
+Rules are created for `Idea` and `Solution` only — the approver gate on
+`System.State` and rationale-required on the decision transitions. `Milestone` and
+`Issue` have no approval gate, so they get none.
+
+The inherited `Epic` type is **disabled**, not removed — an inherited work item type
+cannot be deleted from a process. The inherited `Issue` type was disabled and is now
+**re-enabled**; see the backlog trade-off under Known gaps.
 
 ### `Provision-AdoProject.ps1`
 
@@ -54,6 +86,40 @@ guarantee rather than a client-side filter.
 
 Pass `-SkipAreaPathSecurity` to create the paths but leave permissions inherited if
 you want to review the ACL changes before applying them.
+
+#### Shared queries
+
+Also **Shared Queries/Innovation Backlog**, holding five queries. These are not a
+convenience: backlogs and boards are driven by backlog levels, and `Solution` and
+`Milestone` deliberately have none, so the `Solution → Issue` / `Solution → Milestone`
+hierarchy renders **nowhere** in the product's built-in surfaces. Queries ignore
+backlog levels, which makes a tree query the only thing that can show it. The
+alternative — giving `Solution` a backlog level — is the trade-off already refused for
+`Issue`, since it would put catalog entries on the delivery board.
+
+| Query | Type | Why |
+|---|---|---|
+| **Solution tree** | tree | The hierarchy nothing else renders: issues and milestones nested under their solution. |
+| **Solutions** | flat | The catalog is otherwise unreachable in ADO — no backlog level, no board. |
+| **Roadmap** | flat | Milestones by target date. Excludes `Cancelled`, which is the soft-delete tombstone rather than a state anyone chose. |
+| **Idea tree** | tree | Backlog items under their idea. A convenience — `Idea` is on the Epics backlog already — and the same query with one noun changed. |
+| **Unparented feedback** | `DoesNotContain` | Issues and milestones with no parent solution. A net for link bugs, which are otherwise silent until a rollup looks wrong. |
+
+Unlike the rest of this surface, **queries are cheap**. A field name, a work item type
+name and a picklist value are permanent and organization-wide; a query is
+project-scoped, renamable and deletable with no residue. Guessing wrong costs nothing.
+
+Two behaviours worth knowing:
+
+- **The WIQL is validated before it is stored.** `Ensure-Query` executes each query
+  against `_apis/wit/wiql` first, because an invalid query is otherwise created
+  happily and only fails when a human opens it — long after the run reported success.
+- **An existing query is overwritten when its WIQL differs**, rather than reported as
+  `Exists`. Nothing downstream depends on a query's definition, so the script wins.
+  Renaming a query in `$queries` leaves the old one behind, deliberately: a name is
+  how somebody's bookmark finds it.
+
+Pass `-SkipQueries` if the caller cannot write to Shared Queries.
 
 ### `Provision-SkillsRepository.ps1`
 
@@ -223,6 +289,21 @@ means "approvers, administrators, **and the person who shared it**". Area-path A
 have no owner exception, so an author cannot see their own restricted idea. There is
 no client-side workaround: the data never arrives.
 
+**Accepted trade-off — reported issues appear on the delivery backlog.** `Issue` is
+Basic's inherited type, and it carries `System.RequirementBacklogBehavior`. An
+inherited type cannot be detached from an inherited behavior, so every issue an
+adopter reports against a Solution shows up on the requirement backlog and board
+alongside `Backlog Item`. The alternative was a custom `Solution Issue` type, which
+would have kept feedback off the boards at the cost of claiming another permanent,
+organization-wide work item type name. The name was judged the higher price.
+
+**Not a security boundary — who may edit a solution.** `canEditSolution` allows the
+owner or a reviewer. Unlike visibility (area-path ACLs) and decisions (a process
+rule), nothing enforces this server-side: Azure DevOps lets any project contributor
+edit any work item in an area they can write to, and a process rule cannot express
+"the person named in `System.AssignedTo`". The rule gates the affordance and the
+provider's own check, and nothing more. The same applies to issue triage.
+
 **Verify on a throwaway organization before trusting a real one:**
 
 1. **Field creation shape.** The 7.1 `Fields - Add` reference documents only
@@ -238,6 +319,26 @@ no client-side workaround: the data never arrives.
 4. **Alternate key indexing.** `Ensure-AlternateKey` polls until
    `EntityKeyIndexStatus` is `Active`. Until it is, the key enforces nothing. Confirm
    a duplicate `(target key, voter)` insert is rejected.
+**Confirmed against `CyclotronInc` on 2026-08-12** — no longer open, recorded so they
+are not re-litigated:
+
+- **`icon_trophy` resolves.** It is in the fixed set of 44. `GET
+  _apis/wit/workitemicons` lists them if a future type needs another. Icon and colour
+  are PATCHable later anyway; the type name is not.
+- **`Microsoft.VSTS.Scheduling.TargetDate` attaches cleanly.** It exists
+  organization-wide but sits on no Basic work item type, so `Ensure-Field` takes its
+  "exists org-wide" branch and then POSTs a process-level attach. Both steps worked.
+- **A `Solution` may parent an `Issue`, and a `Milestone`.** This was the real
+  unknown: `Solution` sits on no backlog level while `Issue` sits on the requirement
+  level, and it was not obvious Azure DevOps would accept the pairing. It does —
+  hierarchy rules govern backlog *display*, not whether a link may be created. Both
+  child types were created under a Solution in `InnovationBacklogDev` and removed
+  again. So `System.LinkTypes.Hierarchy-Reverse` stands, and **`createWorkItemFacts`
+  needs no change**: it still sees only Related links, all of which still join an Idea
+  to a Solution, so `SolutionRollup.linkedNeeds` stays honest.
+- **The process serves exactly two projects** — `InnovationBacklog` and
+  `InnovationBacklogDev`, out of 45 in the organization. That is the blast radius of
+  any future change to it.
 
 **Side effect of the approver gate:** making `System.State` read-only for non-approvers
 also stops a submitter moving their own idea from `Draft` to `Triage`. That transition

@@ -1,0 +1,42 @@
+@use "../../Styles/tokens" as *;
+@use "../../Styles/mixins" as *;
+
+/*
+  Moved out of SolutionPanel.module.scss: intake edits tags too, and a form that
+  only LOOKS like the detail modal is worse than one that shares its stylesheet.
+*/
+
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tagInput {
+  width: 104px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  outline: 0;
+
+  &:focus {
+    border-style: solid;
+    border-color: var(--brand-primary);
+  }
+}
+
+.tagLimit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}

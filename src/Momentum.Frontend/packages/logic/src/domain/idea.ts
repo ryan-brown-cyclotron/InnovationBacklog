@@ -56,4 +56,12 @@ export interface CreateIdeaInput {
 export interface UpdateIdeaInput {
   title?: string;
   description?: string;
+  /**
+   * Replaces the whole set. `[]` clears them; `undefined` leaves them alone.
+   *
+   * Same contract as `UpdateSolutionInput.tags`, and for the same reason: a patch
+   * that could not distinguish "no opinion" from "remove them all" would make
+   * clearing the last tag impossible, and people do that.
+   */
+  tags?: string[];
 }

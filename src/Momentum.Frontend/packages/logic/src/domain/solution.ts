@@ -97,6 +97,17 @@ export interface SolutionKindSpec {
   /** Shown under the option in the picker. */
   description: string;
   requires: readonly SolutionRequirement[];
+  /**
+   * Modelled, but not offered at intake.
+   *
+   * A kind reaches this registry before it reaches the form: the ADO picklist value
+   * and the C# enum member are permanent once created, so they are claimed early,
+   * while the form is a decision that can wait. Records of a hidden kind still
+   * READ correctly everywhere — `solutionKindSpec` resolves it, the detail modal
+   * labels it — because hiding it from the picker is a statement about intake, not
+   * about the catalogue.
+   */
+  hidden?: boolean;
 }
 
 export const SOLUTION_KINDS: readonly SolutionKindSpec[] = [
@@ -114,10 +125,39 @@ export const SOLUTION_KINDS: readonly SolutionKindSpec[] = [
       "Something built and reusable: a library, service, template or application.",
     requires: ["repository"],
   },
+  {
+    id: "Skill",
+    label: "Skill",
+    description:
+      "A packaged agent skill: instructions, and whatever they need to run.",
+    /*
+      Nothing. Not an oversight — a skill's repository folder is CREATED by skill
+      intake at plugins/{segment}/skills/{solutionId}__{name}/, so asking an author
+      to name a repository would be asking them to guess at a path the pipeline is
+      about to assign. `requires` says what the AUTHOR must supply, and for a skill
+      that is the package, which this form does not yet take.
+    */
+    requires: [],
+    hidden: true,
+  },
 ];
 
+/**
+ * The kinds intake may offer.
+ *
+ * Pickers render THIS, never `SOLUTION_KINDS` — see `SolutionKindSpec.hidden`.
+ */
+export const INTAKE_SOLUTION_KINDS: readonly SolutionKindSpec[] = SOLUTION_KINDS.filter(
+  (spec) => !spec.hidden,
+);
+
+/**
+ * Resolves against the full registry, hidden kinds included: an existing record of
+ * a hidden kind still has to render with its own label rather than silently
+ * claiming to be the first kind in the list.
+ */
 export function solutionKindSpec(kind: SolutionKind): SolutionKindSpec {
-  return SOLUTION_KINDS.find((spec) => spec.id === kind) ?? SOLUTION_KINDS[0]!;
+  return SOLUTION_KINDS.find((spec) => spec.id === kind) ?? INTAKE_SOLUTION_KINDS[0]!;
 }
 
 export function requires(kind: SolutionKind, requirement: SolutionRequirement): boolean {

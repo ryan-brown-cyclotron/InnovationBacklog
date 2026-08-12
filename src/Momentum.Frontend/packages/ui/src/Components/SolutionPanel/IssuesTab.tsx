@@ -6,7 +6,7 @@ import {
   type SolutionIssue,
   type SolutionIssueStatus,
 } from "@innovation-backlog/logic";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import { Empty } from "../Empty/Empty";
 import { PersonAvatar } from "../PersonAvatar/PersonAvatar";
 import { errorText, personName, relativeTime } from "../../utils";

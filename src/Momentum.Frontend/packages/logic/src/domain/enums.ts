@@ -47,8 +47,14 @@ export type SolutionStatus =
  *
  * The finer classification is still expressible, as ordinary topic tags.
  * See SOLUTION_KINDS in domain/solution.ts for what each kind requires.
+ *
+ * `Skill` is modelled but not offered: it exists here, in the ADO picklist and in
+ * `Momentum.Library.Domain.Solutions.SolutionType`, and `SOLUTION_KINDS` marks it
+ * `hidden` so the intake picker does not render it. A skill's repository folder is
+ * created by skill intake rather than named by whoever fills in the form, so the
+ * form has nothing coherent to ask for until that path is wired to this one.
  */
-export type SolutionKind = "Strategy" | "CustomSolution";
+export type SolutionKind = "Strategy" | "CustomSolution" | "Skill";
 
 /**
  * `Momentum.Library.Domain.Engagement.SolutionUseStatus`.

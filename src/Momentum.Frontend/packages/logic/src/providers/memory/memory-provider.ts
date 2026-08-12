@@ -299,6 +299,7 @@ export function createMemoryProvider(
         const existing = requireIdea(id);
         if (patch.title !== undefined) existing.title = patch.title;
         if (patch.description !== undefined) existing.description = patch.description;
+        if (patch.tags !== undefined) existing.tags = normalizeTags(patch.tags);
         existing.updatedAt = now();
         return settle(clone(existing));
       },

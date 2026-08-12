@@ -1,11 +1,14 @@
 import { useRef } from "react";
 import type React from "react";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./Tabs.module.scss";
 
-export type SolutionTab = "overview" | "activity" | "issues" | "adoption";
-
-export interface TabSpec {
-  id: SolutionTab;
+/**
+ * One tab. `Id` is the caller's own union — the solution modal's four tabs and the
+ * idea modal's three are different sets, and neither should be able to pass one of
+ * the other's ids by accident.
+ */
+export interface TabSpec<Id extends string = string> {
+  id: Id;
   label: string;
   /** Omitted when there is nothing meaningful to count. */
   count?: number;
@@ -13,8 +16,13 @@ export interface TabSpec {
   countLabel?: string;
 }
 
-export const tabId = (tab: SolutionTab) => `solution-tab-${tab}`;
-export const panelId = (tab: SolutionTab) => `solution-panel-${tab}`;
+/**
+ * `group` namespaces the DOM ids so two tabbed surfaces can be mounted at once —
+ * `aria-controls` points at an id, and two strips both claiming `tab-overview`
+ * would wire a reader to whichever rendered first.
+ */
+export const tabId = (group: string, tab: string) => `${group}-tab-${tab}`;
+export const panelId = (group: string, tab: string) => `${group}-panel-${tab}`;
 
 /**
  * The strip. Deliberately more than the tab pattern on the My Work page, which sets
@@ -22,17 +30,22 @@ export const panelId = (tab: SolutionTab) => `solution-panel-${tab}`;
  * reader is told these are tabs without being told what they control, and every tab
  * is a separate stop on the way to the panel.
  *
- * Activation is automatic (selecting on arrow key, not on Enter). All four panels'
- * data is already in props, so there is no fetch to justify making the reader confirm.
+ * Activation is automatic (selecting on arrow key, not on Enter). Every panel's data
+ * is already in props, so there is no fetch to justify making the reader confirm.
  */
-export function SolutionTabs({
+export function Tabs<Id extends string>({
+  group,
+  label,
   tabs,
   active,
   onChange,
 }: {
-  tabs: readonly TabSpec[];
-  active: SolutionTab;
-  onChange: (tab: SolutionTab) => void;
+  group: string;
+  /** Names the strip for a screen reader, e.g. "Solution detail". */
+  label: string;
+  tabs: readonly TabSpec<Id>[];
+  active: Id;
+  onChange: (tab: Id) => void;
 }): React.ReactElement {
   const strip = useRef<HTMLDivElement>(null);
 
@@ -52,7 +65,7 @@ export function SolutionTabs({
     onChange(target.id);
     // Focus follows selection, so the arrow keys move the reader as well as the view.
     strip.current
-      ?.querySelector<HTMLButtonElement>(`#${CSS.escape(tabId(target.id))}`)
+      ?.querySelector<HTMLButtonElement>(`#${CSS.escape(tabId(group, target.id))}`)
       ?.focus();
   }
 
@@ -83,7 +96,8 @@ export function SolutionTabs({
     <div
       ref={strip}
       role="tablist"
-      aria-label="Solution detail"
+      aria-label={label}
+      className={styles.tabList}
       onKeyDown={onKeyDown}
     >
       {tabs.map((tab) => {
@@ -91,11 +105,11 @@ export function SolutionTabs({
         return (
           <button
             key={tab.id}
-            id={tabId(tab.id)}
+            id={tabId(group, tab.id)}
             type="button"
             role="tab"
             aria-selected={selected}
-            aria-controls={panelId(tab.id)}
+            aria-controls={panelId(group, tab.id)}
             // Roving: one Tab press from the strip lands in the panel, not on the
             // next tab.
             tabIndex={selected ? 0 : -1}
@@ -123,17 +137,19 @@ export function SolutionTabs({
 
 /** The scroll container behind one tab. */
 export function TabPanel({
+  group,
   tab,
   children,
 }: {
-  tab: SolutionTab;
+  group: string;
+  tab: string;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
     <div
-      id={panelId(tab)}
+      id={panelId(group, tab)}
       role="tabpanel"
-      aria-labelledby={tabId(tab)}
+      aria-labelledby={tabId(group, tab)}
       // Required, not decorative: every panel scrolls, and a scrollable region with
       // no focusable descendant cannot be reached or scrolled by keyboard at all.
       tabIndex={0}

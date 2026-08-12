@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type React from "react";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import type { SolutionUse } from "../../types";
 import { Empty } from "../Empty/Empty";
 import { adoptionTone } from "./solutionTone";

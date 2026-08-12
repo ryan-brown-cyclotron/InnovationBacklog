@@ -19,7 +19,7 @@ public class CreateSolutionHandlerTests
         Submitter,
         "Solution",
         "Description",
-        SolutionType.Library,
+        SolutionType.CustomSolution,
         "owner",
         "repo",
         "https://example.com/repo",
@@ -77,7 +77,7 @@ public class CreateSolutionHandlerTests
     public async Task Handle_RejectsAMissingRepositoryReference()
     {
         var command = new CreateSolutionCommand(
-            Submitter, "Solution", "Description", SolutionType.Library, "owner", "repo", "");
+            Submitter, "Solution", "Description", SolutionType.CustomSolution, "owner", "repo", "");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => CreateHandler().Handle(command));
     }

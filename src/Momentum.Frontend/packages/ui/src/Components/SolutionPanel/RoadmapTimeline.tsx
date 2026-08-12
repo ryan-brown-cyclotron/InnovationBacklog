@@ -5,7 +5,7 @@ import {
   type Milestone,
   type MilestoneStatus,
 } from "@innovation-backlog/logic";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import {
   milestoneStatusLabel,
   milestoneTargetLabel,

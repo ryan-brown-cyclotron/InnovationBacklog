@@ -1,5 +1,5 @@
 import type React from "react";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./DetailPanel.module.scss";
 
 export interface Stat {
   label: string;

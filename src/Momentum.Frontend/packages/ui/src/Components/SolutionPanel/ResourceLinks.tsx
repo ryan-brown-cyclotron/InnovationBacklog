@@ -1,5 +1,5 @@
 import type React from "react";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import type { Solution } from "../../types";
 
 /**

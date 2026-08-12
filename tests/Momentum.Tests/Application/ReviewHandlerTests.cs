@@ -22,7 +22,7 @@ public class ReviewSolutionHandlerTests
 
     private Task<Solution> SeedAsync() =>
         new CreateSolutionHandler(_solutions, _events, _audit).Handle(new CreateSolutionCommand(
-            Submitter, "Solution", "Description", SolutionType.Library, "owner", "repo", "https://example.com/repo"));
+            Submitter, "Solution", "Description", SolutionType.CustomSolution, "owner", "repo", "https://example.com/repo"));
 
     [Fact]
     public async Task NewSolutionsWaitForApproval()
@@ -112,7 +112,7 @@ public class ReviewLinkHandlerTests
         var request = await new CreateRequestHandler(_requests, _events, _audit)
             .Handle(new CreateRequestCommand(Submitter, RequestType.Backlog, "Idea", "Description"));
         var solution = await new CreateSolutionHandler(_solutions, _events, _audit).Handle(new CreateSolutionCommand(
-            Submitter, "Solution", "Description", SolutionType.Library, "owner", "repo", "https://example.com/repo"));
+            Submitter, "Solution", "Description", SolutionType.CustomSolution, "owner", "repo", "https://example.com/repo"));
         return (request, solution);
     }
 

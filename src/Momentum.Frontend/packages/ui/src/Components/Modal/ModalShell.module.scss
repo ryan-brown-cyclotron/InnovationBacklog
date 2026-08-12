@@ -48,7 +48,12 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 24px;
+  /*
+    No gap here. `tabs` is an opaque node — the caller renders its own
+    `role="tablist"` inside this wrapper — so spacing declared at this level falls
+    between one child and nothing, which is how the strip shipped reading
+    "OverviewActivity 10Issues 1". The row lives in Tabs.module.scss `.tabList`.
+  */
   padding: 0 32px;
   border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;

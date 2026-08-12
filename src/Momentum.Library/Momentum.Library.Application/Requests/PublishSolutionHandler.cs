@@ -53,7 +53,7 @@ public sealed class PublishSolutionHandler
         {
             Title = result.NormalizedTitle.Trim(),
             Description = result.NormalizedDescription.Trim(),
-            Type = SolutionType.Library,
+            Type = SolutionType.CustomSolution,
             SubmittedBy = request.SubmittedBy,
             RepositoryReference = repository,
             Status = SolutionStatus.Published,

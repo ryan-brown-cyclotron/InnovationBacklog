@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type React from "react";
 import { modalStyles } from "../Modal/ModalShell";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import { useApi } from "../../Hooks/useApi";
 import { errorText } from "../../utils";
 

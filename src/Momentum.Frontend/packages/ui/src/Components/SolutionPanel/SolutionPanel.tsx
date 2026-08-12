@@ -8,7 +8,7 @@ import {
   type SolutionIssueStatus,
 } from "@innovation-backlog/logic";
 import { modalStyles, ModalShell } from "../Modal/ModalShell";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./styles";
 import type {
   ActivityRecord,
   Comment,
@@ -30,13 +30,16 @@ import {
 import { buildTimeline } from "../TimelineItems/TimelineItems";
 import { AdoptionForm } from "./AdoptionForm";
 import { AdoptionTab, distinctTeams, headline } from "./AdoptionTab";
-import { ActivityTab } from "./ActivityTab";
+import { ActivityTab } from "../DetailPanel/ActivityTab";
 import { IssuesTab } from "./IssuesTab";
 import { OverviewTab } from "./OverviewTab";
-import { SolutionTabs, TabPanel, type SolutionTab, type TabSpec } from "./SolutionTabs";
+import { Tabs, TabPanel, type TabSpec } from "../Tabs/Tabs";
 import { deriveSolutionStatus, personName, relativeTime } from "../../utils";
 
-export type { SolutionTab } from "./SolutionTabs";
+export type SolutionTab = "overview" | "activity" | "issues" | "adoption";
+
+/** Namespaces this strip's DOM ids. See `Tabs`. */
+const GROUP = "solution";
 
 /**
  * A solution, in four tabs.
@@ -215,7 +218,7 @@ export function SolutionPanel({
   // Tabs
   // -------------------------------------------------------------------------
 
-  const tabs: TabSpec[] = [
+  const tabs: TabSpec<SolutionTab>[] = [
     { id: "overview", label: "Overview" },
     { id: "activity", label: "Activity", count: activityCount, countLabel: "updates" },
     ...(issues
@@ -284,20 +287,37 @@ export function SolutionPanel({
           {usesThis(adoptions, currentUserId) && (
             <span className={styles.usingChip}>✓ You are using this</span>
           )}
-          <button className={modalStyles.primaryButton} onClick={() => setPane("adopt")}>
-            Start using this
-          </button>
+          {/*
+            "Start using this" is deliberately NOT here.
+
+            It was a leftover from the pre-tab design: two triggers for one
+            `pane === "adopt"` overlay, both on screen at once on Overview. Adoption
+            owns the verb now, through its own "+ Record an adoption" — which is
+            where someone is already looking at the list of adopters and thinking "I
+            should add mine". The header keeps only the actions no tab owns.
+
+            The overlay itself stays reachable from `openAdoption`, so a deep link
+            still opens straight into the form.
+          */}
           {role === "administrator" && (
             <button
               className={modalStyles.ghostButton}
               onClick={() => setPane("visibility")}
             >
-              Who can see this
+              Manage access
             </button>
           )}
         </>
       }
-      tabs={<SolutionTabs tabs={tabs} active={active} onChange={(next) => onTabChange?.(next)} />}
+      tabs={
+        <Tabs
+          group={GROUP}
+          label="Solution detail"
+          tabs={tabs}
+          active={active}
+          onChange={(next) => onTabChange?.(next)}
+        />
+      }
       overlays={
         <>
           <OverlayPane
@@ -317,7 +337,7 @@ export function SolutionPanel({
           </OverlayPane>
 
           <OverlayPane
-            title="Who can see this"
+            title="Manage access"
             detail="Administrators decide who this solution is visible to."
             open={pane === "visibility"}
             onClose={() => setPane(null)}
@@ -351,7 +371,7 @@ export function SolutionPanel({
       }
     >
       {active === "overview" && (
-        <TabPanel tab="overview">
+        <TabPanel group={GROUP} tab="overview">
           <OverviewTab
             solution={solution}
             linkedNeeds={linkedNeeds}
@@ -380,17 +400,21 @@ export function SolutionPanel({
       )}
 
       {active === "activity" && (
-        <TabPanel tab="activity">
+        <TabPanel group={GROUP} tab="activity">
           <ActivityTab
             comments={comments}
             activity={activity}
+            note="Comments and progress on this solution"
+            emptyText="No updates yet — share feedback, ask a question, or tell others how your team is using it."
+            emptyComments="No comments yet — share feedback, ask a question, or tell others how your team is using it."
+            emptyEvents="Nothing has happened to this solution yet."
             onAddComment={addComment}
           />
         </TabPanel>
       )}
 
       {active === "issues" && issues && (
-        <TabPanel tab="issues">
+        <TabPanel group={GROUP} tab="issues">
           <IssuesTab
             issues={issues}
             canTriage={canEdit}
@@ -402,7 +426,7 @@ export function SolutionPanel({
       )}
 
       {active === "adoption" && (
-        <TabPanel tab="adoption">
+        <TabPanel group={GROUP} tab="adoption">
           <AdoptionTab
             adoptions={adoptions}
             adoptionCount={adoptionCount}

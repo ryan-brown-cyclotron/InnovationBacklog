@@ -117,7 +117,7 @@ public class LinkSolutionToRequestHandlerTests
         var solutionCreator = new CreateSolutionHandler(_solutions, _events, _audit);
         await solutionCreator.Handle(new Momentum.Library.Application.Requests.CreateSolutionCommand(
             Submitter, "Solution", "Description",
-            Momentum.Library.Domain.Solutions.SolutionType.Library,
+            Momentum.Library.Domain.Solutions.SolutionType.CustomSolution,
             "owner", "repo", "https://example.com/repo"));
     }
 

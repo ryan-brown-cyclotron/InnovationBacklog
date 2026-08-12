@@ -1,21 +1,28 @@
 import { useState } from "react";
 import type React from "react";
-import styles from "./SolutionPanel.module.scss";
+import styles from "./DetailPanel.module.scss";
 import { errorText } from "../../utils";
 
 /**
- * "What it does", correctable in place by whoever owns it.
+ * The description, correctable in place by whoever owns it.
  *
- * Mount with `key={solution.id}` so a refresh onto a different solution cannot leave
- * a stale draft open over someone else's description.
+ * Mount with `key={record.id}` so a refresh onto a different record cannot leave a
+ * stale draft open over someone else's description.
  */
 export function DescriptionEditor({
   description,
   canEdit,
+  title = "What it does",
   onSave,
 }: {
   description: string;
   canEdit: boolean;
+  /**
+   * The section heading. A solution is a thing that DOES something; an idea is a
+   * thing that IS something, and "What it does" over a problem statement reads as a
+   * description of the wrong noun.
+   */
+  title?: string;
   onSave: (description: string) => Promise<void>;
 }): React.ReactElement {
   const [editing, setEditing] = useState(false);
@@ -81,7 +88,7 @@ export function DescriptionEditor({
   return (
     <div className={styles.block}>
       <div className={styles.blockHead}>
-        <h3 className={styles.blockTitle}>What it does</h3>
+        <h3 className={styles.blockTitle}>{title}</h3>
         {canEdit && !editing && (
           <button type="button" className={styles.blockAction} onClick={open}>
             Edit

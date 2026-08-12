@@ -31,7 +31,7 @@ public class SetItemVisibilityHandlerTests
     {
         var creator = new CreateSolutionHandler(_solutions, _events, _audit);
         return await creator.Handle(new CreateSolutionCommand(
-            Submitter, "Solution", "Description", SolutionType.Library, "owner", "repo", "https://example.com/repo"));
+            Submitter, "Solution", "Description", SolutionType.CustomSolution, "owner", "repo", "https://example.com/repo"));
     }
 
     [Fact]

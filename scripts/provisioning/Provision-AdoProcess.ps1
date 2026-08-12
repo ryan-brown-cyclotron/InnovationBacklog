@@ -124,6 +124,7 @@ function Invoke-Ado {
 
 function Write-Created { param([string]$Message) Write-Host "  Created $Message" -ForegroundColor Green }
 function Write-Exists { param([string]$Message) Write-Host "  Exists  $Message" -ForegroundColor DarkGray }
+function Write-Updated { param([string]$Message) Write-Host "  Updated $Message" -ForegroundColor Yellow }
 function Write-Step { param([string]$Message) Write-Host $Message -ForegroundColor Cyan }
 
 # ---------------------------------------------------------------------------
@@ -178,6 +179,16 @@ function Ensure-Process {
 <#
     Picklists are organization-scoped, not process-scoped. Limits are 2048 lists per
     organization and 2048 items per list.
+
+    An existing list is RECONCILED, not skipped. The field's name and type are
+    permanent, but its values are not, and a run that returned early on the first
+    version of a list meant every later value had to be added by hand in the web UI
+    — which is how the script and the organization stop agreeing.
+
+    Additive only, deliberately. Items present in the organization but absent from
+    $Items are LEFT ALONE: work items already carry those values, and a picklist
+    that drops one leaves those records holding a value their own field rejects.
+    Retiring a value is a migration, not a provisioning run.
 #>
 function Ensure-PickList {
     param(
@@ -190,7 +201,25 @@ function Ensure-PickList {
         Where-Object { $_.name -eq $Name }
 
     if ($existing) {
-        Write-Exists "picklist '$Name'"
+        # The list summary carries no items; only the detail read does.
+        $detail = Invoke-Ado -Method GET -Path "work/processes/lists/$($existing.id)"
+        $current = @($detail.items)
+        $missing = @($Items | Where-Object { $current -notcontains $_ })
+
+        if ($missing.Count -eq 0) {
+            Write-Exists "picklist '$Name' ($($current.Count) items)"
+            return $existing.id
+        }
+
+        # PUT replaces the whole list, so the body is current + missing, not missing.
+        Invoke-Ado -Method PUT -Path "work/processes/lists/$($existing.id)" -Body @{
+            id          = $existing.id
+            name        = $Name
+            type        = "String"
+            items       = @($current + $missing)
+            isSuggested = [bool]$IsSuggested
+        } | Out-Null
+        Write-Updated "picklist '$Name' (+$($missing -join ', '))"
         return $existing.id
     }
 
@@ -696,10 +725,17 @@ Write-Step "Ensuring picklists..."
 
     Keep these values in step with SOLUTION_KINDS in
     packages/logic/src/domain/solution.ts, which is the source of truth for what
-    each kind requires.
+    each kind requires — and with SolutionType in
+    src/Momentum.Library/Momentum.Library.Domain/Solutions/SolutionStatus.cs.
+
+    "Skill" is provisioned but hidden at intake: SOLUTION_KINDS marks it `hidden` so
+    the picker does not offer it. The value is claimed here first because a picklist
+    value can be added at any time while the field's name and type cannot change —
+    so the cheap half is done early and the form follows when skill intake is wired
+    to it. Nothing writes the value yet; it costs one string in a list of two.
 #>
 $solutionTypeListId = Ensure-PickList -Name "Innovation Backlog Solution Type" -Items @(
-    "Strategy", "CustomSolution"
+    "Strategy", "CustomSolution", "Skill"
 )
 
 # ---------------------------------------------------------------------------
