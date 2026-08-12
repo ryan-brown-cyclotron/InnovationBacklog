@@ -1,0 +1,326 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Momentum Skill Intake",
+    "description": "Commits an approved skill into the skills repository. The approval decision is made upstream and arrives here already settled; this API owns the mechanics of the write only.",
+    "version": "1.0.0"
+  },
+  "host": "REPLACE-WITH-FUNCTION-APP.azurewebsites.net",
+  "basePath": "/api",
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/skills/validate": {
+      "post": {
+        "summary": "Validate a skill package",
+        "description": "Checks that an upload is shaped like a skill and reports what it contains. Writes nothing. Call this when a user attaches a file, keep the response with the attachment, and show it to the approver later.",
+        "operationId": "ValidateSkill",
+        "x-ms-visibility": "important",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ValidateSkillRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The package was read. Check isValid — an invalid skill is still a 200, because the question was answered.",
+            "schema": {
+              "$ref": "#/definitions/ValidateSkillResponse"
+            }
+          },
+          "400": {
+            "description": "The request itself was malformed — bad JSON, or content that is not base64.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          }
+        }
+      }
+    },
+    "/skills/commit": {
+      "post": {
+        "summary": "Commit an approved skill",
+        "description": "Extracts an uploaded .md, .zip or .skill package, writes it under plugins/{segment}/skills/{solutionId}__{name}/, registers the segment in marketplace.json, and pushes one commit to the branch. Renaming a previously adopted skill moves its folder rather than leaving a duplicate.",
+        "operationId": "CommitApprovedSkill",
+        "x-ms-visibility": "important",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CommitSkillRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The skill was committed.",
+            "schema": {
+              "$ref": "#/definitions/CommitSkillResponse"
+            }
+          },
+          "400": {
+            "description": "The upload or its destination is not usable. The detail names what to fix.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          },
+          "403": {
+            "description": "The caller could not be authenticated to Azure DevOps, or has no write access to the repository.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          },
+          "409": {
+            "description": "The branch moved faster than the commit could be prepared. Retry.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ValidateSkillRequest": {
+      "type": "object",
+      "required": [
+        "uploadFileName",
+        "uploadContentBase64"
+      ],
+      "properties": {
+        "uploadFileName": {
+          "type": "string",
+          "title": "File name",
+          "description": "Original file name. Its extension selects how the upload is unpacked: .md, .zip or .skill.",
+          "x-ms-summary": "File name"
+        },
+        "uploadContentBase64": {
+          "type": "string",
+          "format": "byte",
+          "title": "File content",
+          "description": "The package, base64 encoded.",
+          "x-ms-summary": "File content"
+        }
+      }
+    },
+    "ValidateSkillResponse": {
+      "type": "object",
+      "properties": {
+        "isValid": {
+          "type": "boolean",
+          "title": "Is valid",
+          "description": "False when any issue has severity error. Warnings do not block a commit.",
+          "x-ms-summary": "Is valid"
+        },
+        "skillName": {
+          "type": "string",
+          "title": "Skill name",
+          "description": "Read from the name field of the package's SKILL.md frontmatter.",
+          "x-ms-summary": "Skill name"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "Read from SKILL.md frontmatter. This is what an agent uses to decide whether the skill applies.",
+          "x-ms-summary": "Description"
+        },
+        "fileCount": {
+          "type": "integer",
+          "format": "int32",
+          "x-ms-summary": "File count"
+        },
+        "totalBytes": {
+          "type": "integer",
+          "format": "int32",
+          "x-ms-summary": "Total bytes"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ms-summary": "Paths"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ValidationIssue"
+          },
+          "x-ms-summary": "Issues"
+        }
+      }
+    },
+    "ValidationIssue": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning"
+          ],
+          "description": "Errors block a commit; warnings are for the approver to weigh.",
+          "x-ms-summary": "Severity"
+        },
+        "code": {
+          "type": "string",
+          "description": "Stable identifier, e.g. missing-frontmatter. Branch on this rather than on the message, which will be reworded.",
+          "x-ms-summary": "Code"
+        },
+        "message": {
+          "type": "string",
+          "x-ms-summary": "Message"
+        }
+      }
+    },
+    "CommitSkillRequest": {
+      "type": "object",
+      "required": [
+        "segment",
+        "solutionId",
+        "uploadFileName",
+        "uploadContentBase64",
+        "approvedBy"
+      ],
+      "properties": {
+        "skillName": {
+          "type": "string",
+          "title": "Rename skill to",
+          "description": "Optional. Rewrites the name in the committed SKILL.md frontmatter — use it when the contributor's name needs correcting at approval. Leave empty to keep what they wrote. Must be lowercase letters, digits and hyphens. Unrelated to the folder name, which is always the solution id.",
+          "x-ms-summary": "Rename skill to"
+        },
+        "solutionId": {
+          "type": "string",
+          "title": "Solution id",
+          "description": "GUID of the solution being adopted. Prefixes the skill's folder name as {solutionId}__{name}, and is the whole of the link between the repository and the catalogue.",
+          "x-ms-summary": "Solution id"
+        },
+        "segment": {
+          "type": "string",
+          "title": "Segment",
+          "description": "Plugin folder the skill lands in, chosen by the reviewer.",
+          "x-ms-summary": "Segment"
+        },
+        "uploadFileName": {
+          "type": "string",
+          "title": "File name",
+          "description": "Original file name. Its extension selects how the upload is unpacked: .md, .zip or .skill.",
+          "x-ms-summary": "File name"
+        },
+        "uploadContentBase64": {
+          "type": "string",
+          "format": "byte",
+          "title": "File content",
+          "description": "The package, base64 encoded. Encoding inflates the payload by roughly a third, and connector calls time out near 120 seconds — keep archives well under the 20 MB uncompressed ceiling.",
+          "x-ms-summary": "File content"
+        },
+        "approvedBy": {
+          "type": "string",
+          "title": "Approved by",
+          "description": "Who signed this off. Recorded in the commit message as corroboration; Azure DevOps records the actual author from the caller's own token.",
+          "x-ms-summary": "Approved by"
+        },
+        "branch": {
+          "type": "string",
+          "title": "Branch",
+          "description": "Target branch. Defaults to main.",
+          "default": "main",
+          "x-ms-summary": "Branch",
+          "x-ms-visibility": "advanced"
+        },
+        "pluginVersion": {
+          "type": "string",
+          "title": "Plugin version",
+          "description": "Version recorded in marketplace.json for this segment. Defaults to 1.0.0 for a new segment; leave empty to keep an existing version unchanged.",
+          "x-ms-summary": "Plugin version",
+          "x-ms-visibility": "advanced"
+        }
+      }
+    },
+    "CommitSkillResponse": {
+      "type": "object",
+      "properties": {
+        "commitId": {
+          "type": "string",
+          "title": "Commit id",
+          "x-ms-summary": "Commit id"
+        },
+        "branch": {
+          "type": "string",
+          "title": "Branch",
+          "x-ms-summary": "Branch"
+        },
+        "destinationPath": {
+          "type": "string",
+          "title": "Destination path",
+          "description": "Repository folder the skill was written to.",
+          "x-ms-summary": "Destination path"
+        },
+        "isNewSegment": {
+          "type": "boolean",
+          "title": "New segment",
+          "description": "True when this intake registered the segment in marketplace.json for the first time.",
+          "x-ms-summary": "New segment"
+        },
+        "paths": {
+          "type": "array",
+          "title": "Committed paths",
+          "items": {
+            "type": "string"
+          },
+          "x-ms-summary": "Committed paths"
+        }
+      }
+    },
+    "ProblemDetails": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "x-ms-summary": "Title"
+        },
+        "detail": {
+          "type": "string",
+          "x-ms-summary": "Detail"
+        },
+        "status": {
+          "type": "integer",
+          "format": "int32",
+          "x-ms-summary": "Status"
+        }
+      }
+    }
+  },
+  "securityDefinitions": {
+    "oauth2-auth": {
+      "type": "oauth2",
+      "flow": "accessCode",
+      "authorizationUrl": "https://login.microsoftonline.com/REPLACE-WITH-TENANT-ID/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/REPLACE-WITH-TENANT-ID/oauth2/v2.0/token",
+      "scopes": {
+        "api://REPLACE-WITH-CLIENT-ID/user_impersonation": "Commit skills as the signed-in user."
+      }
+    }
+  },
+  "security": [
+    {
+      "oauth2-auth": [
+        "api://REPLACE-WITH-CLIENT-ID/user_impersonation"
+      ]
+    }
+  ]
+}

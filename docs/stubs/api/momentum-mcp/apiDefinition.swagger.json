@@ -1,0 +1,52 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Momentum MCP",
+    "description": "Innovation Backlog tools for Power Platform agents. Ideas, solutions and their engagement, queried as the signed-in user across Azure DevOps and Dataverse. Tools are discovered from the server at runtime, so this definition does not list them.",
+    "version": "1.0.0"
+  },
+  "host": "REPLACE-WITH-FUNCTION-APP.azurewebsites.net",
+  "basePath": "/runtime/webhooks",
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/mcp": {
+      "post": {
+        "summary": "Momentum MCP server",
+        "description": "Streamable HTTP endpoint speaking MCP over JSON-RPC 2.0.",
+        "operationId": "InvokeMCP",
+        "x-ms-agentic-protocol": "mcp-streamable-1.0",
+        "responses": {
+          "default": {
+            "description": "MCP JSON-RPC response."
+          }
+        }
+      }
+    }
+  },
+  "securityDefinitions": {
+    "oauth2-auth": {
+      "type": "oauth2",
+      "flow": "accessCode",
+      "authorizationUrl": "https://login.microsoftonline.com/REPLACE-WITH-TENANT-ID/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/REPLACE-WITH-TENANT-ID/oauth2/v2.0/token",
+      "scopes": {
+        "api://REPLACE-WITH-CLIENT-ID/user_impersonation": "Query the Innovation Backlog as the signed-in user."
+      }
+    }
+  },
+  "security": [
+    {
+      "oauth2-auth": [
+        "api://REPLACE-WITH-CLIENT-ID/user_impersonation"
+      ]
+    }
+  ]
+}

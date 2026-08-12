@@ -2,7 +2,10 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Momentum.Library.Application.Skills;
+using Momentum.Library.Infrastructure.AzureDevOps;
 using Momentum.Mcp.Auth;
 using Momentum.Mcp.Backends;
 using Momentum.Mcp.Configuration;
@@ -13,6 +16,7 @@ public static class McpServiceCollectionExtensions
 {
     public const string DataverseClientName = "dataverse";
     public const string AzureDevOpsClientName = "ado";
+    public const string SkillsClientName = "skills-ado";
 
     /// <summary>
     /// Registers configuration, the downstream token provider, and one HTTP client per
@@ -66,7 +70,58 @@ public static class McpServiceCollectionExtensions
         services.AddKeyedSingleton(DownstreamResource.AzureDevOps, (provider, _) =>
             CreateClient(provider, AzureDevOpsClientName, DownstreamResource.AzureDevOps));
 
+        AddSkillIntake(services);
+
         return services;
+    }
+
+    /// <summary>
+    /// Skill intake: the git adapter, its HTTP client, and the service that drives them.
+    /// </summary>
+    /// <remarks>
+    /// A separate named client from the MCP tools' Azure DevOps client. Same organization
+    /// and same token, but the adapter takes a plain <see cref="HttpClient"/> and gets its
+    /// authorization from a handler, because it is called from HTTP triggers where the
+    /// caller is scoped rather than threaded.
+    /// </remarks>
+    private static void AddSkillIntake(IServiceCollection services)
+    {
+        services.AddScoped<CallerContextAccessor>();
+
+        services.AddTransient(provider => new CallerTokenHandler(
+            provider.GetRequiredService<IDownstreamTokenProvider>(),
+            provider.GetRequiredService<CallerContextAccessor>(),
+            DownstreamResource.AzureDevOps));
+
+        services.AddHttpClient(SkillsClientName)
+            .ConfigureHttpClient((provider, client) =>
+            {
+                var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+                client.BaseAddress = options.AdoApiRoot;
+                client.DefaultRequestHeaders.Add("Accept", "application/json");
+            })
+            .AddHttpMessageHandler<CallerTokenHandler>()
+            // Same reason as the tools' client: an API caller must never chase a sign-in page.
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+
+        services.AddScoped<ISkillRepository>(provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+
+            return new AdoGitSkillRepository(
+                provider.GetRequiredService<IHttpClientFactory>().CreateClient(SkillsClientName),
+                new AdoGitRepositoryOptions
+                {
+                    Project = string.IsNullOrWhiteSpace(options.SkillsProject)
+                        ? options.AdoProject
+                        : options.SkillsProject,
+                    RepositoryId = options.SkillsRepository,
+                    DefaultBranch = options.SkillsDefaultBranch,
+                },
+                provider.GetRequiredService<ILogger<AdoGitSkillRepository>>());
+        });
+
+        services.AddScoped<SkillIntakeService>();
     }
 
     private static void AddTokenProvider(

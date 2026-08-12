@@ -2,6 +2,7 @@
   <Folder Name="/src/Momentum.Library/">
     <Project Path="src/Momentum.Library/Momentum.Library.Domain/Momentum.Library.Domain.csproj" />
     <Project Path="src/Momentum.Library/Momentum.Library.Application/Momentum.Library.Application.csproj" />
+    <Project Path="src/Momentum.Library/Momentum.Library.Infrastructure/Momentum.Library.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/.tmp/" />
   <Folder Name="/src/">

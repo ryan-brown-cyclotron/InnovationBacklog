@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+
+    <ProjectReference Include="..\Momentum.Library.Application\Momentum.Library.Application.csproj" />
+  </ItemGroup>
+
+</Project>

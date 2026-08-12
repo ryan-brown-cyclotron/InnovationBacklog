@@ -59,6 +59,19 @@ public sealed class McpOptions
     public string? TenantId { get; set; }
 
     /// <summary>
+    /// Azure DevOps project holding the skills git repository. Defaults to
+    /// <see cref="AdoProject"/> — the skills repo often lives beside the backlog, but does
+    /// not have to.
+    /// </summary>
+    public string? SkillsProject { get; set; }
+
+    /// <summary>Name or GUID of the skills git repository.</summary>
+    public string SkillsRepository { get; set; } = "skills";
+
+    /// <summary>Branch skill intake commits to when a request does not name one.</summary>
+    public string SkillsDefaultBranch { get; set; } = "main";
+
+    /// <summary>
     /// Dataverse Web API root, derived rather than configured so a trailing slash in
     /// <see cref="DataverseEnvironmentUrl"/> cannot produce a double slash.
     /// </summary>
