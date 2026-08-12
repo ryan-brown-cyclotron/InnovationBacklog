@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "momentum": {
-      "command": "dotnet",
-      "args": ["src/Momentum.Service/bin/Debug/net9.0/Momentum.Service.dll", "--stdio"]
+      "type": "http",
+      "url": "http://localhost:7071/runtime/webhooks/mcp"
     }
   }
 }

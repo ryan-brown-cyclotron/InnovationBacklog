@@ -55,6 +55,56 @@ guarantee rather than a client-side filter.
 Pass `-SkipAreaPathSecurity` to create the paths but leave permissions inherited if
 you want to review the ACL changes before applying them.
 
+### `Provision-McpAppRegistration.ps1`
+
+The Entra app registration the MCP server (`src/Momentum.Mcp`) authenticates callers
+against. Independent of the three above — it touches the directory, not the backing
+stores — so it can be run at any point.
+
+```powershell
+az login
+./Provision-McpAppRegistration.ps1
+# once the function app exists:
+./Provision-McpAppRegistration.ps1 -ManagedIdentityPrincipalId <mi-object-id>
+```
+
+One registration doing three jobs: it is the **audience of the inbound token** (which
+is never forwarded downstream), it **holds the delegated permissions** for Dataverse
+and Azure DevOps so the server can exchange that token on the caller's behalf, and it
+**names the MCP clients** allowed to ask for it.
+
+That last one is not optional. Entra has no dynamic client registration, and some
+clients — VS Code among them — never surface an interactive consent prompt, so an
+unlisted client fails with a consent error that reads like a server bug. The script
+preauthorizes VS Code and Visual Studio by default; add others with
+`-PreauthorizedClientIds`.
+
+The downstream scope ids are **looked up, not hardcoded**. A hardcoded GUID would turn
+"the Dataverse service principal isn't in this tenant" into an opaque consent failure
+much later; the lookup says so immediately and tells you the `az ad sp create` to run.
+
+**Two steps it deliberately does not attempt**, both printed as follow-ups:
+
+1. **Admin consent** on the two delegated permissions
+   (`az ad app permission admin-consent --id <clientId>`). Until it is granted the
+   on-behalf-of exchange fails for *everyone*, including whoever ran the script.
+2. **Enabling App Service Authentication** on the function app. That is a change to
+   the hosting resource, not the directory, and it is what actually makes the server
+   demand a token — the `WEBSITE_AUTH_PRM_DEFAULT_WITH_SCOPES` setting only advertises
+   the scope.
+
+**On-behalf-of carries access; it does not grant it.** A caller with no Dataverse
+security role, or no Azure DevOps project membership, still gets a 403 from that
+backend after every step here succeeds. Use the `whoami` tool to tell the two apart —
+it reports each backend separately, so a caller who reaches one and not the other
+tells you precisely which grant is missing. A real example of its output:
+
+```
+azureDevOps  reachable: false  401 — VS403318: <user> has not accepted the invitation
+                                to the Cyclotron Inc. organization.
+dataverse    reachable: true   systemuserid c2c73a3d-...
+```
+
 ### `Provision-DataverseSchema.ps1`
 
 Publisher `cycai`, the unmanaged solution `InnovationBacklog`, seven global choices,
@@ -81,6 +131,7 @@ and seven tables:
 | `Provision-AdoProcess.ps1` | PowerShell 7+. PAT with **Work Items (Manage)** at organization scope. |
 | `Provision-AdoProject.ps1` | PowerShell 7+. PAT with **Project and Team (Manage)**, **Work Items (Manage)**, **Graph (Manage)**. |
 | `Provision-DataverseSchema.ps1` | PowerShell 7+, `Az.Accounts`, `Connect-AzAccount`. System Customizer or System Administrator in the target environment. |
+| `Provision-McpAppRegistration.ps1` | PowerShell 7+, Azure CLI, `az login`. Application Administrator (or Application Developer plus an admin for the consent step) in the tenant. |
 
 Both ADO scripts read `$env:AZDO_PAT` when `-Pat` is omitted.
 

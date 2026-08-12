@@ -1,5 +1,11 @@
 # CHECKPOINT — 2026-08-11
 
+## NEXT: Upgrade to .NET 10 + Aspire 9.0 (infrastructure)
+
+After trimming to the lean baseline (commit 29624c9), upgrade all projects from .NET 9 → .NET 10 and Aspire 8.2.2 → 9.0+. The Aspire workload deprecation warning in AppHost (NETSDK1228) blocks clean builds; moving to NuGet packages + .NET 10 removes it. Coordinate: AppHost, ServiceDefaults, all Library/* projects, Mcp, Contracts.
+
+---
+
 Header navigation is reshaped and shipped to Power Platform. The People page is
 the next piece, and it lands on a question the rest of the app has already
 answered inconsistently: **what is a person, and which id are we holding?**

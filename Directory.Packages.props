@@ -3,46 +3,49 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Aspire -->
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="8.2.2" />
-    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="9.0.0" />
-    <PackageVersion Include="Aspire.Hosting.Azure.Storage" Version="8.2.2" />
-    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="8.2.2" />
-    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery.Abstractions" Version="8.2.2" />
-    <!-- ASP.NET Core -->
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
-    <!-- MCP -->
-    <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
-    <!-- Agent runtime -->
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.0.0-preview.251007.1" />
-    <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="1.0.0-preview.251007.1" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.2" />
-    <!-- Azure Storage -->
-    <PackageVersion Include="Azure.Data.Tables" Version="12.11.0" />
-    <PackageVersion Include="Azure.Storage.Blobs" Version="12.24.0" />
-    <PackageVersion Include="Azure.Storage.Queues" Version="12.23.0" />
-    <!-- Azure Functions -->
-    <PackageVersion Include="Microsoft.Azure.Functions.Worker" Version="2.0.0" />
-    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.0" />
-    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Extensions.Storage.Queues" Version="5.5.2" />
-    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Extensions.Mcp" Version="1.0.0-preview.7" />
-    <!-- GitHub -->
-    <PackageVersion Include="Octokit" Version="14.0.0" />
-    <!-- OpenAPI -->
-    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <!--
+      Aspire. Aspire.Hosting.AppHost is NOT listed here: from Aspire 13 the AppHost
+      project sets Sdk="Aspire.AppHost.Sdk/<version>" on its <Project> element and the
+      SDK supplies that package implicitly. That version is inline in
+      src/Momentum.AppHost/Momentum.AppHost.csproj and cannot be governed by CPM —
+      bump it by hand alongside anything Aspire here.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.8.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+    <!-- Azure Functions worker + MCP extension -->
+    <PackageVersion Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
+    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.1.0" />
+    <PackageVersion Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.51.0" />
+    <!--
+      Supplies AddApplicationInsightsTelemetryWorkerService; the Functions package above
+      only adapts it. Held on the 2.x line deliberately — 3.x removed ITelemetryInitializer,
+      which the Functions adapter still binds against, and the worker dies at startup with
+      a TypeLoadException. Move both together or not at all.
+    -->
+    <PackageVersion Include="Microsoft.ApplicationInsights.WorkerService" Version="2.23.0" />
+    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.0" />
+    <PackageVersion Include="Microsoft.Azure.Functions.Worker.Extensions.Mcp" Version="1.6.0" />
+    <!--
+      Identity / on-behalf-of. MSAL directly rather than Microsoft.Identity.Web: the
+      OBO exchange is an explicit AcquireTokenOnBehalfOf call, and Identity.Web's
+      conveniences hang off an ASP.NET Core auth pipeline a Functions worker has not got.
+    -->
+    <PackageVersion Include="Microsoft.Identity.Client" Version="4.87.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+    <!-- Plumbing -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.10" />
     <!-- OpenTelemetry -->
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.0" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.11.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.11.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.11.0" />
-    <!-- JWT validation -->
-    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="7.6.3" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <!-- Contract generation -->
     <PackageVersion Include="TypeGen" Version="6.0.4" />
     <!-- Testing -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
-    <PackageVersion Include="xunit" Version="2.9.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 </Project>

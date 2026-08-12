@@ -8,5 +8,16 @@
       }
     }
   },
-  "functionTimeout": "00:05:00"
+  "functionTimeout": "00:05:00",
+  "extensions": {
+    "mcp": {
+      "serverName": "momentum",
+      "serverVersion": "0.1.0",
+      "instructions": "Query the Innovation Backlog. Work items (ideas, solutions, backlog items) live in Azure DevOps; engagement data (votes, adoptions, participation, activity) lives in Dataverse. Every call runs as the signed-in user, so results are scoped to what that user can see in each system.",
+      "encryptClientState": true,
+      "system": {
+        "webhookAuthorizationLevel": "System"
+      }
+    }
+  }
 }

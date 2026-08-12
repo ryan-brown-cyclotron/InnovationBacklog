@@ -1,20 +1,23 @@
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Momentum.Mcp;
 
-namespace Momentum.Mcp;
+var builder = FunctionsApplication.CreateBuilder(args);
 
-public class Program
-{
-    public static void Main()
-    {
-        var host = new HostBuilder()
-            .ConfigureServices(services =>
-            {
-                // Service registration for MCP will go here when implementing real tools/resources
-            })
-            .ConfigureFunctionsWorkerDefaults()
-            .Build();
+builder.ConfigureFunctionsWebApplication();
 
-        host.Run();
-    }
-}
+builder.Services
+    .AddApplicationInsightsTelemetryWorkerService()
+    .ConfigureFunctionsApplicationInsights();
+
+/*
+    Deliberately not AddServiceDefaults(). Momentum.ServiceDefaults carries a
+    FrameworkReference to Microsoft.AspNetCore.App and hangs its endpoints off a
+    WebApplication; the Functions worker is neither. Telemetry comes from the worker's
+    own Application Insights integration and the OTLP variables the host passes down.
+*/
+builder.Services.AddMomentumMcp(builder.Configuration, builder.Environment);
+
+builder.Build().Run();

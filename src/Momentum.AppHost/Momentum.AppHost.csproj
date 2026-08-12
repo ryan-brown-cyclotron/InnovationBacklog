@@ -1,15 +1,22 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<!--
+  Aspire 13 replaces Microsoft.NET.Sdk outright and supplies Aspire.Hosting.AppHost
+  implicitly, so neither appears below. The SDK version is inline because MSBuild
+  resolves it before Directory.Packages.props is read — it cannot be centralised.
+-->
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsAspireHost>true</IsAspireHost>
-    <DisableAspireWorkloadDeprecationWarning>true</DisableAspireWorkloadDeprecationWarning>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" />
     <ProjectReference Include="..\Momentum.Service\Momentum.Service.csproj" />
-    <ProjectReference Include="..\Momentum.Mcp\Momentum.Mcp.csproj" />
+    <!--
+      Momentum.Mcp is launched by the Functions host (see Program.cs), not as an
+      Aspire project resource. This reference exists so it still builds first.
+    -->
+    <ProjectReference Include="..\Momentum.Mcp\Momentum.Mcp.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 
 </Project>
