@@ -20,11 +20,35 @@ import type {
 } from "../../domain/engagement.js";
 import { targetKey } from "../../domain/engagement.js";
 import type { ItemVisibility, Role } from "../../domain/enums.js";
-import { canReview, canSee, isActiveAdoption } from "../../domain/enums.js";
+import {
+  canEditSolution,
+  canReview,
+  canSee,
+  canSetIssueStatus,
+  isActiveAdoption,
+  sameUser,
+} from "../../domain/enums.js";
+import type {
+  CreateSolutionIssueInput,
+  SolutionIssue,
+  UpdateSolutionIssueInput,
+} from "../../domain/feedback.js";
 import type { CurrentUser, UserRef } from "../../domain/identity.js";
 import type { CreateIdeaInput, Idea, IdeaQuery, UpdateIdeaInput } from "../../domain/idea.js";
+import type {
+  CreateMilestoneInput,
+  Milestone,
+  UpdateMilestoneInput,
+} from "../../domain/roadmap.js";
+import { compareMilestones } from "../../domain/roadmap.js";
 import type { IdeaRollup, RollupMap, SearchItem, SearchQuery, SearchResult, SolutionRollup } from "../../domain/search.js";
-import type { CreateSolutionInput, Solution, SolutionQuery } from "../../domain/solution.js";
+import type {
+  CreateSolutionInput,
+  Solution,
+  SolutionQuery,
+  UpdateSolutionInput,
+} from "../../domain/solution.js";
+import { normalizeTags } from "../../domain/tags.js";
 import type { ApprovalInbox, Decision } from "../../contracts/approvals-provider.js";
 import type { InnovationBacklogProvider } from "../../contracts/provider.js";
 import { AppError } from "../../errors/errors.js";
@@ -107,6 +131,40 @@ export function createMemoryProvider(
     if (!canReview(role)) {
       throw new AppError("Approver role required", { category: "permission" });
     }
+  };
+
+  /**
+   * The solution, if the caller may author its roadmap.
+   *
+   * Ordered so an invisible solution reports "not found" before a permission error
+   * could confirm it exists — same reason `requireSolution` exists at all.
+   */
+  const requireRoadmapEditor = (solutionId: string): Solution => {
+    const solution = requireSolution(solutionId);
+    if (!canEditSolution(role, sameUser(solution.ownerId, me))) {
+      throw new AppError("Only the owner or a reviewer can change the roadmap", {
+        category: "permission",
+      });
+    }
+    return solution;
+  };
+
+  const requireIssue = (solutionId: string, issueId: string): SolutionIssue => {
+    const found = store.solutionIssues.find(
+      (i) => i.id === issueId && i.solutionId === solutionId,
+    );
+    if (!found) throw new AppError(`Issue ${issueId} not found`, { category: "notFound" });
+    return found;
+  };
+
+  const requireMilestone = (solutionId: string, milestoneId: string): Milestone => {
+    const found = store.milestones.find(
+      (m) => m.id === milestoneId && m.solutionId === solutionId,
+    );
+    if (!found) {
+      throw new AppError(`Milestone ${milestoneId} not found`, { category: "notFound" });
+    }
+    return found;
   };
 
   // -------------------------------------------------------------------------
@@ -359,6 +417,22 @@ export function createMemoryProvider(
         return settle(clone(created));
       },
 
+      async updateSolution(id: string, patch: UpdateSolutionInput): Promise<Solution> {
+        // requireSolution first: invisible and absent must stay indistinguishable,
+        // so a permission error never confirms that something exists.
+        const existing = requireSolution(id);
+        if (!canEditSolution(role, sameUser(existing.ownerId, me))) {
+          throw new AppError("Only the owner or a reviewer can edit this solution", {
+            category: "permission",
+          });
+        }
+
+        if (patch.description !== undefined) existing.description = patch.description;
+        if (patch.tags !== undefined) existing.tags = normalizeTags(patch.tags);
+        existing.updatedAt = now();
+        return settle(clone(existing));
+      },
+
       async listLinkedIdeas(solutionId: string): Promise<Idea[]> {
         const ids = allLinks().filter((l) => l.solutionId === solutionId).map((l) => l.ideaId);
         return settle(clone(visibleIdeas().filter((i) => ids.includes(i.id))));
@@ -396,6 +470,129 @@ export function createMemoryProvider(
         existing.visibility = visibility;
         existing.updatedAt = now();
         return settle(clone(existing));
+      },
+
+      // Both present, so the offline app exercises the tabs a host without them hides.
+      issues: {
+        async listIssues(solutionId: string): Promise<SolutionIssue[]> {
+          requireSolution(solutionId);
+          const rows = store.solutionIssues
+            .filter((i) => i.solutionId === solutionId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          return settle(clone(rows));
+        },
+
+        async createIssue(
+          solutionId: string,
+          input: CreateSolutionIssueInput,
+        ): Promise<SolutionIssue> {
+          // No role check by design: seeing a solution is the gate. Anything stricter
+          // would defeat the point of an inbound channel.
+          requireSolution(solutionId);
+          if (!input.title.trim()) {
+            throw new AppError("An issue needs a title", { category: "validation" });
+          }
+
+          const created: SolutionIssue = {
+            id: nextId("iss"),
+            solutionId,
+            title: input.title.trim(),
+            description: input.description ?? "",
+            status: "To Do",
+            reportedBy: me,
+            assignedTo: null,
+            createdAt: now(),
+            updatedAt: now(),
+          };
+          store.solutionIssues.push(created);
+          return settle(clone(created));
+        },
+
+        async updateIssue(
+          solutionId: string,
+          issueId: string,
+          patch: UpdateSolutionIssueInput,
+        ): Promise<SolutionIssue> {
+          const solution = requireSolution(solutionId);
+          const existing = requireIssue(solutionId, issueId);
+
+          if (patch.status !== undefined && patch.status !== existing.status) {
+            const allowed = canSetIssueStatus(
+              patch.status,
+              role,
+              sameUser(solution.ownerId, me),
+              sameUser(existing.reportedBy, me),
+            );
+            if (!allowed) {
+              throw new AppError("Only the solution owner can triage this issue", {
+                category: "permission",
+              });
+            }
+            existing.status = patch.status;
+          }
+
+          if (patch.title !== undefined) existing.title = patch.title;
+          if (patch.description !== undefined) existing.description = patch.description;
+          existing.updatedAt = now();
+          return settle(clone(existing));
+        },
+      },
+
+      roadmap: {
+        async listMilestones(solutionId: string): Promise<Milestone[]> {
+          requireSolution(solutionId);
+          // Cancelled is the tombstone deleteMilestone writes, so it never renders.
+          const rows = store.milestones
+            .filter((m) => m.solutionId === solutionId && m.status !== "Cancelled")
+            .sort(compareMilestones);
+          return settle(clone(rows));
+        },
+
+        async createMilestone(
+          solutionId: string,
+          input: CreateMilestoneInput,
+        ): Promise<Milestone> {
+          requireRoadmapEditor(solutionId);
+          const created: Milestone = {
+            id: nextId("ms"),
+            solutionId,
+            title: input.title.trim() || "New milestone",
+            note: input.note ?? "",
+            status: input.status ?? "Planned",
+            targetDate: input.targetDate ?? null,
+            targetLabel: input.targetLabel ?? "",
+            createdAt: now(),
+            updatedAt: now(),
+          };
+          store.milestones.push(created);
+          return settle(clone(created));
+        },
+
+        async updateMilestone(
+          solutionId: string,
+          milestoneId: string,
+          patch: UpdateMilestoneInput,
+        ): Promise<Milestone> {
+          requireRoadmapEditor(solutionId);
+          const existing = requireMilestone(solutionId, milestoneId);
+
+          if (patch.title !== undefined) existing.title = patch.title;
+          if (patch.note !== undefined) existing.note = patch.note;
+          if (patch.status !== undefined) existing.status = patch.status;
+          if (patch.targetDate !== undefined) existing.targetDate = patch.targetDate;
+          if (patch.targetLabel !== undefined) existing.targetLabel = patch.targetLabel;
+          existing.updatedAt = now();
+          return settle(clone(existing));
+        },
+
+        async deleteMilestone(solutionId: string, milestoneId: string): Promise<void> {
+          requireRoadmapEditor(solutionId);
+          const existing = requireMilestone(solutionId, milestoneId);
+          // Soft, matching the Azure DevOps adapter, which has no DELETE verb.
+          existing.status = "Cancelled";
+          existing.updatedAt = now();
+          await settle(undefined);
+        },
       },
     },
 
@@ -724,24 +921,4 @@ export function createMemoryProvider(
     return clone(item);
   }
 
-}
-
-/**
- * Trimmed, whitespace-collapsed, deduped case-insensitively keeping the first
- * spelling, capped at 8. Mirrors `TagList.Normalize` on the backend — a provider
- * that skips this lets the same tag exist twice with different casing.
- */
-function normalizeTags(tags: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of tags) {
-    const value = raw.trim().replace(/\s+/g, " ").slice(0, 32);
-    if (!value) continue;
-    const key = value.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(value);
-    if (result.length === 8) break;
-  }
-  return result;
 }

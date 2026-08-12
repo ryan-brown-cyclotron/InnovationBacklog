@@ -3,8 +3,9 @@
 .SYNOPSIS
     Provisions the "Innovation Backlog" inherited process in Azure DevOps.
 .DESCRIPTION
-    Creates an inherited process based on Basic, then the Idea, Solution and
-    Backlog Item work item types with their states, custom fields and rules.
+    Creates an inherited process based on Basic, then the Idea, Solution, Backlog
+    Item and Milestone work item types with their states, custom fields and rules,
+    and re-enables Basic's inherited Issue type.
 
     Every operation is idempotent: each Ensure-* helper reads before it writes and
     reports "Exists" instead of failing. Re-running the script changes nothing.
@@ -271,6 +272,55 @@ function Disable-InheritedWorkItemType {
         } | Out-Null
     }
     Write-Created "disabled inherited work item type '$Name'"
+}
+
+<#
+    The reverse of Disable-InheritedWorkItemType.
+
+    `Issue` ships with Basic and this script used to disable it. It is now the record
+    for a problem reported against a Solution, so it is switched back on.
+
+    KNOWN AND ACCEPTED: `Issue` carries Basic's System.RequirementBacklogBehavior, and
+    an inherited type cannot be detached from an inherited behavior. Re-enabling it
+    therefore puts adopter-reported issues on the delivery backlog alongside Backlog
+    Item. That was weighed against minting a permanent custom type and the permanent
+    name was judged the higher price. See "Known gaps" in README.md.
+
+    A type still marked `system` has no override to PATCH, so it is materialised the
+    same way the disable path does — just enabled.
+#>
+function Enable-InheritedWorkItemType {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $types = (Invoke-Ado -Method GET -Path "work/processes/$ProcessId/workitemtypes").value
+    $wit = $types | Where-Object { $_.name -eq $Name }
+
+    if (-not $wit) {
+        Write-Exists "inherited type '$Name' not present; nothing to enable"
+        return
+    }
+    if (-not $wit.isDisabled) {
+        Write-Exists "work item type '$Name' already enabled"
+        return
+    }
+
+    if ($wit.customization -eq "system") {
+        Invoke-Ado -Method POST -Path "work/processes/$ProcessId/workitemtypes" -Body @{
+            inheritsFrom = $wit.referenceName
+            isDisabled   = $false
+            color        = $wit.color
+            icon         = $wit.icon
+        } | Out-Null
+    }
+    else {
+        Invoke-Ado -Method PATCH -Path "work/processes/$ProcessId/workitemtypes/$($wit.referenceName)" -Body @{
+            isDisabled = $false
+        } | Out-Null
+    }
+    Write-Created "enabled inherited work item type '$Name'"
 }
 
 <#
@@ -751,6 +801,52 @@ $backlogItem = Ensure-WorkItemType -ProcessId $processId -Name "Backlog Item" `
 # Parent link, which Basic already provides and which the boards understand.
 
 # ---------------------------------------------------------------------------
+# Milestone
+# ---------------------------------------------------------------------------
+
+Write-Step "Ensuring the Milestone work item type..."
+
+# The roadmap a Solution publishes to the people adopting it. Like Solution, it takes
+# no backlog behavior below: a promise about a catalog entry is not delivery work.
+#
+# Distinct from the "milestones" in docs/design/capabilities/momentum, which are
+# achievement thresholds crossed by events and are correctly DERIVED. This is a plan,
+# and nothing can derive a plan.
+$milestone = Ensure-WorkItemType -ProcessId $processId -Name "Milestone" `
+    -Description "A dated commitment on a Solution's roadmap. Child of the Solution." `
+    -Color "e5731a" -Icon "icon_trophy"
+
+# Cancelled is not cosmetic. The Azure DevOps client has no DELETE verb, and
+# destroying a work item is a heavier act than dropping a line from a roadmap, so
+# removing a milestone moves it here and the list query filters it out.
+Set-Workflow -ProcessId $processId -WitRefName $milestone -States @(
+    @{ Name = "Planned";     Category = "Proposed";   Color = "b2b2b2" }
+    @{ Name = "In progress"; Category = "InProgress"; Color = "007acc" }
+    @{ Name = "Shipped";     Category = "Completed";  Color = "339947" }
+    @{ Name = "Cancelled";   Category = "Removed";    Color = "e60017" }
+)
+
+# An EXISTING organization field, verified present in this org. Ensure-Field takes
+# its "exists org-wide" branch and only attaches it to the type, so no new
+# permanent name is claimed in an organization shared with dozens of projects.
+Ensure-Field -ProcessId $processId -WitRefName $milestone `
+    -ReferenceName "Microsoft.VSTS.Scheduling.TargetDate" -Name "Target Date" -Type dateTime `
+    -Description "First day of the target period. Orders the roadmap."
+
+# What the roadmap PRINTS, and the one new org-wide name this feature claims.
+#
+# A date cannot express granularity: "Q4 2026" is a quarter and "Sep 2026" is a
+# month, and no instant tells them apart. A string alone cannot be sorted — "Q4 2026"
+# precedes "Sep 2026" lexically. So the date orders and this labels, and neither is
+# asked to do the other's job. Empty means "format the target date".
+Ensure-Field -ProcessId $processId -WitRefName $milestone `
+    -ReferenceName "Custom.InnovationBacklogTargetLabel" -Name "Target Label" -Type string `
+    -Description "How the target reads on the roadmap: 'Q4 2026', 'Sep 2026'. Empty formats Target Date."
+
+# No fields for the note: System.Description already carries it, in keeping with the
+# native-first discipline recorded at the top of this file.
+
+# ---------------------------------------------------------------------------
 # Rules
 # ---------------------------------------------------------------------------
 
@@ -840,14 +936,18 @@ foreach ($wit in @($idea, $solution)) {
 Write-Step "Assigning backlog levels..."
 
 # Basic's levels are Epics > Issues > Tasks. Idea takes the portfolio level and
-# Backlog Item the requirement level; Solution stays off the backlogs entirely
-# because a catalog entry is not work.
+# Backlog Item the requirement level; Solution and Milestone stay off the backlogs
+# entirely because a catalog entry is not work, and neither is a promise about one.
 Set-BacklogBehavior -ProcessId $processId -WitRefName $idea -BehaviorName "Epics" -IsDefault
 Set-BacklogBehavior -ProcessId $processId -WitRefName $backlogItem -BehaviorName "Issues" -IsDefault
 
 Write-Step "Disabling unused inherited types..."
 Disable-InheritedWorkItemType -ProcessId $processId -Name "Epic"
-Disable-InheritedWorkItemType -ProcessId $processId -Name "Issue"
+
+# Issue is the record for a problem reported against a Solution — see the note on
+# Enable-InheritedWorkItemType for the backlog trade-off this accepts.
+Write-Step "Enabling the Issue work item type..."
+Enable-InheritedWorkItemType -ProcessId $processId -Name "Issue"
 
 # ---------------------------------------------------------------------------
 # Done
@@ -867,4 +967,5 @@ Write-Host ""
     IdeaRefName         = $idea
     SolutionRefName     = $solution
     BacklogItemRefName  = $backlogItem
+    MilestoneRefName    = $milestone
 }

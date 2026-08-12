@@ -10,6 +10,9 @@
  *   src/Momentum.Library/Momentum.Library.Domain/**
  */
 
+// Type-only, and no cycle: feedback.ts imports nothing from here.
+import type { SolutionIssueStatus } from "./feedback.js";
+
 /** `Momentum.Library.Domain.Requests.RequestStatus`. */
 export type IdeaStatus =
   | "Draft"
@@ -93,6 +96,61 @@ export function canReview(role: Role): boolean {
 /** Only administrators decide who can see what. */
 export function canChangeVisibility(role: Role): boolean {
   return role === "Administrator";
+}
+
+/**
+ * Whether two user references are the same person.
+ *
+ * Both sides of every ownership comparison in this app are UPNs — `Solution.ownerId`
+ * comes from `System.AssignedTo`'s uniqueName and `CurrentUser.id` from
+ * `userPrincipalName` — but Entra and Azure DevOps do not agree on their casing, so
+ * `Ryan.Brown@…` and `ryan.brown@…` are the same person spelled two ways. A bare
+ * `===` silently hides every "this is mine" affordance for anyone whose two records
+ * disagree.
+ */
+export function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = a?.trim().toLowerCase();
+  const right = b?.trim().toLowerCase();
+  return Boolean(left && right && left === right);
+}
+
+/**
+ * Who may correct a catalog entry's description and tags, and author its roadmap.
+ *
+ * The owner, because they shared it and are the first to know when the description
+ * stops being true; and reviewers, because a published entry is the catalog's claim
+ * as much as its owner's.
+ *
+ * NOT A SECURITY BOUNDARY, unlike the two rules above it. Visibility is enforced by
+ * an area-path ACL and decisions by an Azure DevOps process rule, so those two merely
+ * predict what the server will do anyway. There is no equivalent for ownership: ADO
+ * lets any project contributor edit any work item in an area they can write to, and a
+ * process rule cannot express "the person named in AssignedTo". This gates the
+ * affordance and the provider's own check, and nothing more.
+ */
+export function canEditSolution(role: Role, isOwner: boolean): boolean {
+  return isOwner || canReview(role);
+}
+
+/**
+ * Who may move a reported issue to `target`.
+ *
+ * Triage belongs to the solution's owner. "Doing" is a claim that the owner is
+ * working on it, so only they can make it. What the reporter can do is withdraw their
+ * own report or reopen it — those are claims about their own problem, and nobody is
+ * better placed to make them.
+ *
+ * Same caveat as `canEditSolution`: not a security boundary. Azure DevOps will let
+ * any contributor patch any state; this gates the affordance and the provider check.
+ */
+export function canSetIssueStatus(
+  target: SolutionIssueStatus,
+  role: Role,
+  isSolutionOwner: boolean,
+  isReporter: boolean,
+): boolean {
+  if (isSolutionOwner || canReview(role)) return true;
+  return isReporter && target !== "Doing";
 }
 
 /**

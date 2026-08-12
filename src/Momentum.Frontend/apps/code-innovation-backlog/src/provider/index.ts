@@ -103,7 +103,17 @@ export function createCodeAppProvider(
 
   // One client for both halves: an idea is an ADO work item joined to a Dataverse
   // engagement rollup, and neither side can answer alone.
-  const items = { client: ado, rollups, role };
+  //
+  // `currentUserId` is the Azure DevOps identity — CurrentUser.id, a UPN — and NOT
+  // `identity.currentSystemUserId`, which is the Dataverse GUID engagement rows are
+  // keyed by. Ownership on a work item is System.AssignedTo's uniqueName, so only
+  // the UPN can ever match it.
+  const items = {
+    client: ado,
+    rollups,
+    role,
+    currentUserId: async () => (await identity.getCurrentUser())?.id ?? null,
+  };
 
   // Files are native ADO work item attachments. Shared between comments (which key
   // relations to the comment they belong to) and the collaboration provider (which

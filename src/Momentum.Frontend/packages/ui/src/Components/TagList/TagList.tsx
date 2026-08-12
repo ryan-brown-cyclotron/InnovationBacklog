@@ -9,11 +9,14 @@ export function TagList({
   tags,
   max,
   onSelect,
+  onRemove,
 }: {
   tags: readonly string[] | undefined;
   /** Show at most this many, then "+N". Omit to show all. */
   max?: number;
   onSelect?: (tag: string) => void;
+  /** Present when the reader may edit them: each tag grows a remove control. */
+  onRemove?: (tag: string) => void;
 }): React.ReactElement | null {
   const all = tags ?? [];
   if (all.length === 0) return null;
@@ -25,7 +28,7 @@ export function TagList({
     <ul className={styles.tags}>
       {shown.map((tag) =>
         onSelect ? (
-          <li key={tag}>
+          <li key={tag} className={onRemove ? styles.tagEditable : undefined}>
             <button
               type="button"
               className={`${styles.tag} ${styles.tagButton}`}
@@ -37,10 +40,12 @@ export function TagList({
             >
               {tag}
             </button>
+            {onRemove && <RemoveTag tag={tag} onRemove={onRemove} />}
           </li>
         ) : (
           <li key={tag} className={styles.tag}>
             {tag}
+            {onRemove && <RemoveTag tag={tag} onRemove={onRemove} />}
           </li>
         ),
       )}
@@ -50,5 +55,28 @@ export function TagList({
         </li>
       )}
     </ul>
+  );
+}
+
+function RemoveTag({
+  tag,
+  onRemove,
+}: {
+  tag: string;
+  onRemove: (tag: string) => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className={styles.remove}
+      aria-label={`Remove tag ${tag}`}
+      title={`Remove ${tag}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onRemove(tag);
+      }}
+    >
+      ×
+    </button>
   );
 }

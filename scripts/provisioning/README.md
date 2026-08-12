@@ -55,6 +55,43 @@ guarantee rather than a client-side filter.
 Pass `-SkipAreaPathSecurity` to create the paths but leave permissions inherited if
 you want to review the ACL changes before applying them.
 
+### `Provision-SkillsRepository.ps1`
+
+The git repository skill intake commits into. Independent of the three backing-store
+scripts.
+
+```powershell
+./Provision-SkillsRepository.ps1 -Organization contoso -Project "Innovation Backlog" `
+    -Segments engineering,operations
+```
+
+Seeds `.claude-plugin/marketplace.json`, a README, and a `.gitattributes` that marks
+binary types. **The manifest is not optional** — intake reads it before every commit and
+refuses to invent one, so without this step the first adoption fails with *"the skills
+repository is not initialised"*.
+
+Layout it establishes:
+
+```
+plugins/{segment}/skills/{solutionId}__{name}/SKILL.md
+```
+
+`solutionId` is the GUID of the catalogue entry the skill was adopted from, and it is
+**the entire link** between this repository and the backlog — no sidecar file, no lookup
+table. The name after it keeps the repository readable. A double underscore separates
+them, because a single one is legal inside a skill name and the split has to be
+unambiguous.
+
+The two never have to agree with anything else: discovery is driven by the `name` in
+SKILL.md frontmatter, not by the directory, so the folder is free to carry the id.
+
+**A rename is a move, not a copy.** Approving a skill under a corrected name writes to a
+different folder, so intake deletes the solution's previous folder in the same commit.
+Without that the marketplace would publish one solution twice under two names.
+
+The PAT provisions the repository and is not used at runtime — intake commits as the
+calling user, so each approver needs **Contribute** on it.
+
 ### `Provision-McpAppRegistration.ps1`
 
 The Entra app registration the MCP server (`src/Momentum.Mcp`) authenticates callers
@@ -132,6 +169,7 @@ and seven tables:
 | `Provision-AdoProject.ps1` | PowerShell 7+. PAT with **Project and Team (Manage)**, **Work Items (Manage)**, **Graph (Manage)**. |
 | `Provision-DataverseSchema.ps1` | PowerShell 7+, `Az.Accounts`, `Connect-AzAccount`. System Customizer or System Administrator in the target environment. |
 | `Provision-McpAppRegistration.ps1` | PowerShell 7+, Azure CLI, `az login`. Application Administrator (or Application Developer plus an admin for the consent step) in the tenant. |
+| `Provision-SkillsRepository.ps1` | PowerShell 7+. PAT with **Code (Read, write, & manage)**. |
 
 Both ADO scripts read `$env:AZDO_PAT` when `-Pat` is omitted.
 

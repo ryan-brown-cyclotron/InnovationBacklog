@@ -17,6 +17,7 @@ import type {
   SolutionUse,
   View,
 } from "./types";
+import type { Milestone, SolutionIssue } from "@innovation-backlog/logic";
 import { useApi } from "./Hooks/useApi";
 import { discoveryStub, errorText, isSolutionItem } from "./utils";
 import { useWorkspace } from "./Hooks/useWorkspace";
@@ -24,7 +25,10 @@ import { useApprovals } from "./Hooks/useApprovals";
 import { useSearch } from "./Hooks/useSearch";
 import { Topbar } from "./Components/Topbar/Topbar";
 import { RequestPanel } from "./Components/RequestPanel/RequestPanel";
-import { SolutionPanel } from "./Components/SolutionPanel/SolutionPanel";
+import {
+  SolutionPanel,
+  type SolutionTab,
+} from "./Components/SolutionPanel/SolutionPanel";
 import { Home } from "./Pages/Home/Home";
 import { MyWork } from "./Pages/MyWork/MyWork";
 import { Approvals } from "./Pages/Approvals/Approvals";
@@ -33,6 +37,13 @@ import { ContributeModal } from "./Components/ContributeModal/ContributeModal";
 import { Discovery as DiscoveryView } from "./Pages/Discovery/Discovery";
 
 type UserWithRole = AppUser & { role?: string };
+
+const SOLUTION_TABS = ["overview", "activity", "issues", "adoption"] as const;
+
+/** A ?tab= param is user input, so it is validated rather than cast. */
+function isSolutionTab(value: string | null): value is SolutionTab {
+  return Boolean(value) && (SOLUTION_TABS as readonly string[]).includes(value!);
+}
 
 export function App(): React.ReactElement {
   const { user } = useMomentumContext();
@@ -54,6 +65,16 @@ export function App(): React.ReactElement {
   const [solutionActivity, setSolutionActivity] = useState<ActivityRecord[]>([]);
   const [solutionAdoptions, setSolutionAdoptions] = useState<SolutionUse[]>([]);
   const [solutionAdoptionOpen, setSolutionAdoptionOpen] = useState(false);
+  /*
+   * `undefined` means this host cannot serve them at all, and the surface hides.
+   * `[]` means it answered and there is nothing yet, which is a claim about the
+   * solution and gets an empty state. The distinction is load-bearing — collapsing
+   * it to `[]` would tell every reader on the REST host that nobody has ever
+   * reported a bug against anything.
+   */
+  const [solutionIssues, setSolutionIssues] = useState<SolutionIssue[] | undefined>();
+  const [solutionMilestones, setSolutionMilestones] = useState<Milestone[] | undefined>();
+  const [solutionTab, setSolutionTab] = useState<SolutionTab>("overview");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -89,19 +110,40 @@ export function App(): React.ReactElement {
         .then((request) => openRequest(request))
         .catch((reason) => setError(errorText(reason)));
     } else if (solutionId) {
+      const tab = params.get("tab");
+      const deepTab: SolutionTab = isSolutionTab(tab) ? tab : "overview";
       api<Solution>(`/api/solutions/${solutionId}`)
-        .then((solution) => openSolution(solution))
+        .then((solution) => openSolution(solution, deepTab))
         .catch((reason) => setError(errorText(reason)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  function syncModalUrl(kind: "need" | "solution", id: string | null) {
+  /**
+   * Keeps the address bar in step with the modal.
+   *
+   * `replaceState`, not `pushState`: Back should close the modal, not walk back
+   * through the tabs someone clicked while it was open. The tab is part of the URL
+   * because Share copies `window.location.href` verbatim — without it, sharing from
+   * the Issues table sends a link that opens on Overview.
+   */
+  function syncModalUrl(
+    kind: "need" | "solution",
+    id: string | null,
+    tab?: SolutionTab,
+  ) {
     const url = new URL(window.location.href);
     url.searchParams.delete("need");
     url.searchParams.delete("solution");
+    url.searchParams.delete("tab");
     if (id) url.searchParams.set(kind, id);
+    if (id && tab && tab !== "overview") url.searchParams.set("tab", tab);
     window.history.replaceState(null, "", url.toString());
+  }
+
+  function changeSolutionTab(tab: SolutionTab) {
+    setSolutionTab(tab);
+    if (selectedSolution) syncModalUrl("solution", selectedSolution.id, tab);
   }
 
   async function openRequest(request: Request) {
@@ -149,19 +191,32 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function openSolution(solution: Solution) {
-    syncModalUrl("solution", solution.id);
+  async function openSolution(solution: Solution, tab: SolutionTab = "overview") {
+    syncModalUrl("solution", solution.id, tab);
     // Only one engagement modal at a time.
     setSelected(null);
     setSelectedSolution(solution);
+    setSolutionTab(tab);
+    // Reset to "not asked yet" so the previous solution's tabs cannot linger.
+    setSolutionIssues(undefined);
+    setSolutionMilestones(undefined);
     try {
-      const [nextNeeds, nextComments, nextActivity, nextAdoptions] = await Promise.allSettled([
+      const [
+        nextNeeds,
+        nextComments,
+        nextActivity,
+        nextAdoptions,
+        nextIssues,
+        nextMilestones,
+      ] = await Promise.allSettled([
         api<Request[]>(`/api/solutions/${solution.id}/requests`),
         api<Comment[]>(`/api/solutions/${solution.id}/comments`),
         api<ActivityRecord[]>(`/api/solutions/${solution.id}/activity`),
         // Who is using it, not how many. The rows carry project, team, stage and
         // dates; the summary reduced all of that to a count before it was ever shown.
         api<SolutionUse[]>(`/api/solutions/${solution.id}/use`),
+        api<SolutionIssue[]>(`/api/solutions/${solution.id}/issues`),
+        api<Milestone[]>(`/api/solutions/${solution.id}/milestones`),
       ]);
       if (nextNeeds.status === "fulfilled") setLinkedNeeds(nextNeeds.value);
       else setError(errorText(nextNeeds.reason));
@@ -171,6 +226,17 @@ export function App(): React.ReactElement {
       else setError(errorText(nextActivity.reason));
       // Degrades to the counts alone rather than banner-ing the panel.
       setSolutionAdoptions(nextAdoptions.status === "fulfilled" ? nextAdoptions.value : []);
+      /*
+       * Rejected maps to `undefined`, NOT `[]`, and deliberately never reaches
+       * setError. A host that cannot serve these rejects every time — the REST host
+       * 404s and the code app throws "Unsupported route" — and an absent capability
+       * is not a failure. This is the same reasoning the insights branch already
+       * uses; the tab simply is not offered.
+       */
+      setSolutionIssues(nextIssues.status === "fulfilled" ? nextIssues.value : undefined);
+      setSolutionMilestones(
+        nextMilestones.status === "fulfilled" ? nextMilestones.value : undefined,
+      );
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -407,7 +473,12 @@ export function App(): React.ReactElement {
           solutionSummary={workspace.state.solutionSummary}
           requestSummary={workspace.state.requestSummary}
           role={role}
+          currentUserId={user?.id ?? null}
+          issues={solutionIssues}
+          milestones={solutionMilestones}
           openAdoption={solutionAdoptionOpen}
+          tab={solutionTab}
+          onTabChange={changeSolutionTab}
           onClose={() => {
             syncModalUrl("solution", null);
             setSolutionAdoptionOpen(false);
@@ -420,7 +491,8 @@ export function App(): React.ReactElement {
               const refreshed = await api<Solution>(
                 `/api/solutions/${selectedSolution.id}`,
               );
-              await openSolution(refreshed);
+              // Refreshing must not throw the reader back to Overview.
+              await openSolution(refreshed, solutionTab);
               await workspace.load();
             } catch (reason) {
               setError(errorText(reason));

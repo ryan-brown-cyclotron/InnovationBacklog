@@ -1,37 +1,55 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { modalStyles as styles } from "../Modal/ModalShell";
-import { ModalShell } from "../Modal/ModalShell";
+import {
+  sameUser,
+  type Milestone,
+  type MilestoneStatus,
+  type SolutionIssue,
+  type SolutionIssueStatus,
+} from "@innovation-backlog/logic";
+import { modalStyles, ModalShell } from "../Modal/ModalShell";
+import styles from "./SolutionPanel.module.scss";
 import type {
   ActivityRecord,
   Comment,
   Request,
   RequestSummary,
-  SearchItem,
-  SearchResult,
   Solution,
   SolutionSummary,
   SolutionUse,
   Visibility,
 } from "../../types";
 import { useApi } from "../../Hooks/useApi";
-import { CommentComposer } from "../CommentComposer/CommentComposer";
 import { DecisionForm } from "../DecisionForm/DecisionForm";
 import { OverlayPane } from "../OverlayPane/OverlayPane";
-import { TagList } from "../TagList/TagList";
+import { PersonAvatar } from "../PersonAvatar/PersonAvatar";
 import {
   VisibilityBadge,
   VisibilityControl,
 } from "../VisibilityControl/VisibilityControl";
-import { TimelineItems } from "../TimelineItems/TimelineItems";
-import {
-  deriveSolutionStatus,
-  isIdeaItem,
-  personName,
-  relativeTime,
-  upvoteCountLabel,
-} from "../../utils";
+import { buildTimeline } from "../TimelineItems/TimelineItems";
+import { AdoptionForm } from "./AdoptionForm";
+import { AdoptionTab, distinctTeams, headline } from "./AdoptionTab";
+import { ActivityTab } from "./ActivityTab";
+import { IssuesTab } from "./IssuesTab";
+import { OverviewTab } from "./OverviewTab";
+import { SolutionTabs, TabPanel, type SolutionTab, type TabSpec } from "./SolutionTabs";
+import { deriveSolutionStatus, personName, relativeTime } from "../../utils";
 
+export type { SolutionTab } from "./SolutionTabs";
+
+/**
+ * A solution, in four tabs.
+ *
+ * Orchestration only: this file owns the props, the mutations, the overlay panes and
+ * the header. Every tab body and every editable section is a sibling under this
+ * folder, sharing one stylesheet.
+ *
+ * `issues` and `milestones` are CAPABILITIES. `undefined` means the host could not be
+ * asked and the surface is not rendered; `[]` means it was asked and there is nothing
+ * yet, which is a claim about this solution and gets an empty state. Collapsing the
+ * two would tell every reader on the REST host that nobody has ever reported a bug.
+ */
 export function SolutionPanel({
   solution,
   linkedNeeds,
@@ -41,7 +59,12 @@ export function SolutionPanel({
   solutionSummary,
   requestSummary,
   role,
+  currentUserId = null,
+  issues,
+  milestones,
   openAdoption = false,
+  tab = "overview",
+  onTabChange,
   onClose,
   onOpenRequest,
   onRefresh,
@@ -55,17 +78,20 @@ export function SolutionPanel({
   solutionSummary: SolutionSummary;
   requestSummary: RequestSummary;
   role: string;
+  /** For "is this mine" — a UPN on both sides. Null before identity resolves. */
+  currentUserId?: string | null;
+  /** Undefined when the host cannot serve them: the Issues tab is not rendered. */
+  issues?: SolutionIssue[];
+  /** Undefined when the host cannot serve them: the Roadmap is not rendered. */
+  milestones?: Milestone[];
   openAdoption?: boolean;
+  tab?: SolutionTab;
+  onTabChange?: (tab: SolutionTab) => void;
   onClose: () => void;
   onOpenRequest: (request: Request) => void;
   onRefresh: () => Promise<void>;
 }): React.ReactElement {
   const api = useApi();
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [linkQuery, setLinkQuery] = useState("");
-  const [linkResults, setLinkResults] = useState<SearchItem[]>([]);
-  const [linkBusy, setLinkBusy] = useState(false);
-  const [adoptBusy, setAdoptBusy] = useState(false);
   // One overlay pane at a time, layered over the modal.
   const [pane, setPane] = useState<"adopt" | "visibility" | "decision" | null>(
     openAdoption ? "adopt" : null,
@@ -81,6 +107,33 @@ export function SolutionPanel({
   const adoptionCount = adoptions.length || summary?.adoptions || solution.useCount || 0;
   const teams = summary?.teams ?? distinctTeams(adoptions);
   const stage = deriveSolutionStatus({ id: solution.id }, summary);
+
+  const isOwner = sameUser(solution.ownerId, currentUserId);
+  const isReviewer = role === "approver" || role === "administrator";
+  const canEdit = isOwner || isReviewer;
+  const canReview = isReviewer && solution.status === "AwaitingApproval";
+  const visibility = (solution.visibility as Visibility) ?? "Everyone";
+
+  // Counted from the rows the feed will actually render, not from the raw arrays —
+  // the feed drops comment.added, hidden actions and superseded decisions.
+  const activityCount = useMemo(
+    () => buildTimeline(comments, activity).length,
+    [comments, activity],
+  );
+  const openIssues = issues?.filter((issue) => issue.status !== "Done").length;
+
+  // -------------------------------------------------------------------------
+  // Mutations. Every one refreshes rather than patching local state, so the
+  // panel cannot drift from what the next reader will load.
+  // -------------------------------------------------------------------------
+
+  const patchSolution = async (body: Record<string, unknown>) => {
+    await api(`/api/solutions/${solution.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    await onRefresh();
+  };
 
   async function addComment(draft: {
     body: string;
@@ -99,9 +152,6 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify({ solutionId: solution.id }),
     });
-    setLinkQuery("");
-    setLinkResults([]);
-    setConnectOpen(false);
     await onRefresh();
   }
 
@@ -113,89 +163,133 @@ export function SolutionPanel({
     await onRefresh();
   }
 
-  async function recordAdoption(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    setAdoptBusy(true);
-    try {
-      await api(`/api/solutions/${solution.id}/use`, {
-        method: "POST",
-        body: JSON.stringify({
-          projectName: data.get("projectName"),
-          team: data.get("team") || undefined,
-          status: data.get("status") || "Exploring",
-        }),
-      });
-      form.reset();
-      setPane(null);
-      await onRefresh();
-    } finally {
-      setAdoptBusy(false);
-    }
+  async function setAdoptionStatus(useId: string, status: string) {
+    await api(`/api/solutions/${solution.id}/use/${useId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    await onRefresh();
   }
 
-  useEffect(() => {
-    if (!linkQuery.trim()) {
-      setLinkResults([]);
-      return;
-    }
-    const handle = setTimeout(async () => {
-      setLinkBusy(true);
-      try {
-        // /api/search spans everyone's ideas; /api/requests is only your own.
-        const result = await api<SearchResult>(
-          `/api/search?query=${encodeURIComponent(linkQuery)}&take=10`,
-        );
-        const linkedIds = new Set(linkedNeeds.map((need) => need.id));
-        setLinkResults(
-          result.items.filter(
-            (item) => isIdeaItem(item.itemType) && !linkedIds.has(item.itemId),
-          ),
-        );
-      } catch {
-        setLinkResults([]);
-      } finally {
-        setLinkBusy(false);
-      }
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [linkQuery, linkedNeeds]);
+  async function reportIssue(input: { title: string; description: string }) {
+    await api(`/api/solutions/${solution.id}/issues`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    await onRefresh();
+  }
 
-  const metaParts: string[] = [];
-  if (solution.ownerId) metaParts.push(`Shared by ${personName(solution.ownerId)}`);
-  metaParts.push(solution.type);
-  metaParts.push(`Updated ${relativeTime(solution.updatedAt)}`);
+  async function setIssueStatus(issueId: string, status: SolutionIssueStatus) {
+    await api(`/api/solutions/${solution.id}/issues/${issueId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    await onRefresh();
+  }
 
-  const visibility = (solution.visibility as Visibility) ?? "Everyone";
-  const canReview =
-    (role === "approver" || role === "administrator") &&
-    solution.status === "AwaitingApproval";
+  async function createMilestone() {
+    await api(`/api/solutions/${solution.id}/milestones`, {
+      method: "POST",
+      body: JSON.stringify({ title: "New milestone", status: "Planned" }),
+    });
+    await onRefresh();
+  }
+
+  async function updateMilestone(
+    id: string,
+    patch: { title?: string; status?: MilestoneStatus },
+  ) {
+    await api(`/api/solutions/${solution.id}/milestones/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    await onRefresh();
+  }
+
+  async function deleteMilestone(id: string) {
+    await api(`/api/solutions/${solution.id}/milestones/${id}`, { method: "DELETE" });
+    await onRefresh();
+  }
+
+  // -------------------------------------------------------------------------
+  // Tabs
+  // -------------------------------------------------------------------------
+
+  const tabs: TabSpec[] = [
+    { id: "overview", label: "Overview" },
+    { id: "activity", label: "Activity", count: activityCount, countLabel: "updates" },
+    ...(issues
+      ? [
+          {
+            id: "issues" as const,
+            label: "Issues",
+            count: openIssues,
+            countLabel: "open",
+          },
+        ]
+      : []),
+    { id: "adoption", label: "Adoption", count: adoptionCount, countLabel: "adoptions" },
+  ];
+
+  // Issues can arrive after first paint, or never. A tab that disappears must not
+  // leave the panel rendering nothing.
+  const active = tabs.some((each) => each.id === tab) ? tab : "overview";
 
   return (
     <ModalShell
-      eyebrow={`SOLUTION · ${stage}`}
-      badge={<VisibilityBadge visibility={visibility} />}
+      eyebrow="SOLUTION"
+      badge={
+        <>
+          <span className={styles.statusPill}>
+            <span className={styles.statusDot} />
+            {stage}
+          </span>
+          <VisibilityBadge visibility={visibility} />
+          <span className={styles.updated}>
+            Updated {relativeTime(solution.updatedAt)}
+          </span>
+        </>
+      }
       tone="solution"
       title={solution.title}
-      meta={metaParts.join(" · ")}
+      meta={
+        <span className={styles.byline}>
+          {solution.ownerId && (
+            <>
+              <PersonAvatar id={solution.ownerId} size="sm" />
+              <span className={styles.bylineName}>{personName(solution.ownerId)}</span>
+              <span className={styles.bylineSeparator}>·</span>
+            </>
+          )}
+          <span>{solution.type}</span>
+        </span>
+      }
       onClose={onClose}
       primaryAction={
         <>
           {canReview && (
             <button
-              className={styles.primaryButton}
+              className={modalStyles.primaryButton}
               onClick={() => setPane("decision")}
             >
               Review
             </button>
           )}
-          <button className={styles.primaryButton} onClick={() => setPane("adopt")}>
+          {/*
+            A chip, not a flipped primary button. Whether one of these adoptions is
+            YOURS is a display-name match across two identity stores, so it is right
+            often but not always — and a primary action that occasionally lies about
+            what it will do is far worse than a badge that occasionally goes missing.
+          */}
+          {usesThis(adoptions, currentUserId) && (
+            <span className={styles.usingChip}>✓ You are using this</span>
+          )}
+          <button className={modalStyles.primaryButton} onClick={() => setPane("adopt")}>
             Start using this
           </button>
           {role === "administrator" && (
             <button
-              className={styles.ghostButton}
+              className={modalStyles.ghostButton}
               onClick={() => setPane("visibility")}
             >
               Who can see this
@@ -203,324 +297,141 @@ export function SolutionPanel({
           )}
         </>
       }
-    >
-      <OverlayPane
-        title="Start using this"
-        detail="Recording who uses a solution is how the hub knows what is working."
-        open={pane === "adopt"}
-        onClose={() => setPane(null)}
-      >
-        <form className={styles.adoptForm} onSubmit={recordAdoption}>
-          <input
-            name="projectName"
-            required
-            placeholder="Project or team name"
-            className={styles.adoptInput}
-            aria-label="Project name"
-          />
-          <input
-            name="team"
-            placeholder="Team (optional)"
-            className={styles.adoptInput}
-            aria-label="Team"
-          />
-          <select
-            name="status"
-            defaultValue="Exploring"
-            className={styles.adoptInput}
-            aria-label="Adoption status"
+      tabs={<SolutionTabs tabs={tabs} active={active} onChange={(next) => onTabChange?.(next)} />}
+      overlays={
+        <>
+          <OverlayPane
+            title="Start using this"
+            detail="Recording who uses a solution is how the hub knows what is working."
+            open={pane === "adopt"}
+            onClose={() => setPane(null)}
           >
-            <option value="Exploring">Exploring</option>
-            <option value="Implementing">Implementing</option>
-            <option value="Using">Using</option>
-          </select>
-          <div className={styles.adoptActions}>
-            <button
-              type="button"
-              className={styles.adoptCancel}
-              onClick={() => setPane(null)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={styles.adoptSubmit}
-              disabled={adoptBusy}
-            >
-              {adoptBusy ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
-      </OverlayPane>
-
-      <OverlayPane
-        title="Who can see this"
-        detail="Administrators decide who this solution is visible to."
-        open={pane === "visibility"}
-        onClose={() => setPane(null)}
-      >
-        <VisibilityControl
-          itemType="solutions"
-          itemId={solution.id}
-          visibility={visibility}
-          onChanged={onRefresh}
-        />
-      </OverlayPane>
-
-      <OverlayPane
-        title="Review this solution"
-        detail="Until it is accepted, only reviewers and the person who shared it can see it."
-        open={pane === "decision"}
-        onClose={() => setPane(null)}
-      >
-        <DecisionForm
-          onDecide={async (decision, rationale) => {
-            await api(`/api/solutions/${solution.id}/${decision}`, {
-              method: "POST",
-              body: JSON.stringify({ rationale }),
-            });
-            setPane(null);
-            await onRefresh();
-          }}
-        />
-      </OverlayPane>
-
-      <div className={styles.columns}>
-        <div className={styles.mainCol}>
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>What it does</h3>
-            <p className={styles.bodyText}>{solution.description}</p>
-            <TagList tags={solution.tags} />
-          </section>
-
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>Ideas this supports</h3>
-            {linkedNeeds.length === 0 ? (
-              <p className={styles.emptyText}>
-                This solution is not connected to an idea yet.
-              </p>
-            ) : (
-              <>
-                <p className={styles.sectionHint}>
-                  Connected to:
-                </p>
-                <ul className={styles.rowList}>
-                  {linkedNeeds.map((need) => {
-                    const upvotes = requestSummary[need.id]?.votes ?? 0;
-                    return (
-                      <li key={need.id}>
-                        <div className={styles.rowItem}>
-                          <button
-                            className={styles.rowMain}
-                            style={{
-                              border: 0,
-                              background: "transparent",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              padding: 0,
-                            }}
-                            onClick={() => onOpenRequest(need)}
-                          >
-                            <span className={styles.rowTitle}>{need.title}</span>
-                            <span className={styles.rowMeta}>
-                              {upvotes > 0 ? upvoteCountLabel(upvotes) : "No upvotes yet"}
-                            </span>
-                          </button>
-                          <button
-                            className={styles.rowRemove}
-                            onClick={() => void unlinkNeed(need.id)}
-                            aria-label={`Remove ${need.title}`}
-                            title="Remove"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-            {!connectOpen ? (
-              <button
-                className={styles.actionLink}
-                onClick={() => setConnectOpen(true)}
-              >
-                Connect another idea →
-              </button>
-            ) : (
-              <div className={styles.linkSearch}>
-                <input
-                  type="text"
-                  value={linkQuery}
-                  onChange={(e) => setLinkQuery(e.target.value)}
-                  placeholder="Search ideas to connect…"
-                  className={styles.linkInput}
-                  aria-label="Search ideas to connect"
-                  autoFocus
-                />
-                {linkBusy && <span className={styles.linkBusy}>Searching…</span>}
-                {linkResults.length > 0 && (
-                  <ul className={styles.linkResults}>
-                    {linkResults.map((item) => (
-                      <li key={item.itemId}>
-                        <button
-                          className={styles.linkResultItem}
-                          onClick={() => void linkNeed(item.itemId)}
-                        >
-                          {item.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {!linkBusy && linkQuery.trim() && linkResults.length === 0 && (
-                  <span className={styles.linkBusy}>No ideas found.</span>
-                )}
-              </div>
-            )}
-          </section>
-
-          {(solution.repositoryUrl || solution.demoUrl) && (
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Resources</h3>
-              <ul className={styles.resourceList}>
-                {solution.demoUrl && (
-                  <li>
-                    <a
-                      href={solution.demoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <span className={styles.resourceName}>Demo</span>
-                      <span className={styles.resourceValue}>
-                        {demoLinkLabel(solution.demoUrl)} ↗
-                      </span>
-                    </a>
-                  </li>
-                )}
-                {solution.repositoryUrl && (
-                  <li>
-                    <a
-                      href={solution.repositoryUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <span className={styles.resourceName}>Repository</span>
-                      <span className={styles.resourceValue}>
-                        {solution.repositoryOwner}/{solution.repositoryName} ↗
-                      </span>
-                    </a>
-                  </li>
-                )}
-              </ul>
-            </section>
-          )}
-          {(adoptionCount > 0 || teams > 0 || adoptions.length > 0) && (
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Who is using this</h3>
-              <p className={styles.sectionHint}>{adoptionHeadline(adoptionCount, teams)}</p>
-              {/*
-                The rows, not the tally. Someone deciding whether to adopt this wants
-                to see the other adopters — which team, on what, how far along, and
-                whether anyone finished — and every one of those facts was already in
-                the response that produced the number above it.
-              */}
-              {adoptions.length > 0 && (
-                <ul className={styles.adoptionList}>
-                  {adoptions.map((use) => (
-                    <AdoptionRow key={use.id} use={use} />
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </div>
-
-        <div className={styles.sideCol}>
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>Conversation and progress</h3>
-            <div className={styles.timeline}>
-              <TimelineItems
-                comments={comments}
-                activity={activity}
-                emptyText="No updates yet — share feedback, ask a question, or tell others how your team is using it."
-              />
-            </div>
-            <CommentComposer
-              placeholder="Share feedback or an update"
-              onSubmit={addComment}
+            <AdoptionForm
+              solutionId={solution.id}
+              onDone={async () => {
+                setPane(null);
+                await onRefresh();
+              }}
+              onCancel={() => setPane(null)}
             />
-          </section>
-        </div>
-      </div>
+          </OverlayPane>
+
+          <OverlayPane
+            title="Who can see this"
+            detail="Administrators decide who this solution is visible to."
+            open={pane === "visibility"}
+            onClose={() => setPane(null)}
+          >
+            <VisibilityControl
+              itemType="solutions"
+              itemId={solution.id}
+              visibility={visibility}
+              onChanged={onRefresh}
+            />
+          </OverlayPane>
+
+          <OverlayPane
+            title="Review this solution"
+            detail="Until it is accepted, only reviewers and the person who shared it can see it."
+            open={pane === "decision"}
+            onClose={() => setPane(null)}
+          >
+            <DecisionForm
+              onDecide={async (decision, rationale) => {
+                await api(`/api/solutions/${solution.id}/${decision}`, {
+                  method: "POST",
+                  body: JSON.stringify({ rationale }),
+                });
+                setPane(null);
+                await onRefresh();
+              }}
+            />
+          </OverlayPane>
+        </>
+      }
+    >
+      {active === "overview" && (
+        <TabPanel tab="overview">
+          <OverviewTab
+            solution={solution}
+            linkedNeeds={linkedNeeds}
+            requestSummary={requestSummary}
+            milestones={milestones}
+            canEdit={canEdit}
+            stats={[
+              { label: "teams using", value: teams },
+              { label: "open issues", value: openIssues },
+              { label: "comments", value: summary?.comments ?? comments.length },
+              {
+                label: "milestones shipped",
+                value: milestones?.filter((m) => m.status === "Shipped").length,
+              },
+            ]}
+            onOpenRequest={onOpenRequest}
+            onSaveDescription={(description) => patchSolution({ description })}
+            onSaveTags={(tags) => patchSolution({ tags })}
+            onLinkIdea={linkNeed}
+            onUnlinkIdea={unlinkNeed}
+            onCreateMilestone={createMilestone}
+            onUpdateMilestone={updateMilestone}
+            onDeleteMilestone={deleteMilestone}
+          />
+        </TabPanel>
+      )}
+
+      {active === "activity" && (
+        <TabPanel tab="activity">
+          <ActivityTab
+            comments={comments}
+            activity={activity}
+            onAddComment={addComment}
+          />
+        </TabPanel>
+      )}
+
+      {active === "issues" && issues && (
+        <TabPanel tab="issues">
+          <IssuesTab
+            issues={issues}
+            canTriage={canEdit}
+            currentUserId={currentUserId}
+            onCreate={reportIssue}
+            onSetStatus={setIssueStatus}
+          />
+        </TabPanel>
+      )}
+
+      {active === "adoption" && (
+        <TabPanel tab="adoption">
+          <AdoptionTab
+            adoptions={adoptions}
+            adoptionCount={adoptionCount}
+            teams={teams}
+            onRecord={() => setPane("adopt")}
+            onSetStatus={setAdoptionStatus}
+          />
+        </TabPanel>
+      )}
     </ModalShell>
   );
 }
 
+export { headline as adoptionHeadline };
+
 /**
- * One adopter.
+ * Whether one of these adoptions looks like the reader's own.
  *
- * The team leads, because "who else is doing this" is the question the list answers;
- * the project is what they are doing it on. An adoption with no team names the project
- * in the same position rather than reading "— · Northwind RFP response", which is the
- * same shape the rollup uses when it counts DISTINCT `team ?? projectName`.
+ * Best effort, deliberately. `Adoption.startedBy` is a Dataverse systemuser GUID
+ * while `CurrentUser.id` is a UPN — two id spaces that cannot be joined client-side
+ * (see CHECKPOINT.md) — so this falls back to the resolved display name. It is used
+ * only to show a badge, never to gate an action.
  */
-function AdoptionRow({ use }: { use: SolutionUse }): React.ReactElement {
-  const who = use.startedByName?.trim() || personName(use.startedBy);
-  const heading = use.team?.trim() || use.projectName || "A team";
-  const detail = use.team?.trim() && use.projectName ? use.projectName : "";
-  const settled = Boolean(use.completedAt);
-
-  return (
-    <li className={styles.adoptionRow}>
-      <div className={styles.adoptionMain}>
-        <span className={styles.adoptionWho}>
-          {heading}
-          {detail && <span className={styles.adoptionProject}> · {detail}</span>}
-        </span>
-        <span className={styles.adoptionMeta}>
-          {settled
-            ? `Rolled out ${relativeTime(use.completedAt)} · started by ${who}`
-            : `Started ${relativeTime(use.startedAt)} by ${who}`}
-        </span>
-      </div>
-      <span
-        className={`${styles.adoptionStage} ${settled ? styles.adoptionStageDone : ""}`}
-      >
-        {settled ? "Rolled out" : use.status || "Exploring"}
-      </span>
-    </li>
-  );
-}
-
-/** "Used by 3 teams · 4 adoptions", without repeating itself when they are equal. */
-function adoptionHeadline(adoptions: number, teams: number): string {
-  const uses = `${adoptions} adoption${adoptions === 1 ? "" : "s"}`;
-  if (teams <= 0) return uses;
-  const across = `${teams} team${teams === 1 ? "" : "s"}`;
-  return teams === adoptions ? `Used by ${across}` : `Used by ${across} · ${uses}`;
-}
-
-/**
- * Distinct `team ?? projectName`, case-insensitively — the same rule the rollup uses,
- * so a panel that fell back to counting rows itself still says the same number.
- */
-function distinctTeams(adoptions: SolutionUse[]): number {
-  const seen = new Set<string>();
-  for (const use of adoptions) {
-    const label = (use.team || use.projectName || "").trim().toLowerCase();
-    if (label) seen.add(label);
-  }
-  return seen.size;
-}
-
-/** Host and path of a demo link, so the row stays readable. */
-function demoLinkLabel(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
-  } catch {
-    return url;
-  }
+function usesThis(adoptions: SolutionUse[], currentUserId: string | null): boolean {
+  if (!currentUserId) return false;
+  const me = personName(currentUserId).trim().toLowerCase();
+  if (!me) return false;
+  return adoptions.some((use) => {
+    if (sameUser(use.startedBy, currentUserId)) return true;
+    return (use.startedByName ?? "").trim().toLowerCase() === me;
+  });
 }

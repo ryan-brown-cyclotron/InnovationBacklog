@@ -15,6 +15,8 @@ export function ModalShell({
   description,
   meta,
   primaryAction,
+  tabs,
+  overlays,
   onClose,
   children,
 }: {
@@ -24,8 +26,28 @@ export function ModalShell({
   tone: "need" | "solution";
   title: string;
   description?: string;
-  meta?: string;
+  /** A node rather than a string so a caller can put an avatar in the byline. */
+  meta?: React.ReactNode;
   primaryAction?: React.ReactNode;
+  /**
+   * A tab strip, rendered between the header and the body.
+   *
+   * Deliberately NOT part of `children`. The body is padded, so a strip inside it
+   * would inset its own bottom border by the padding on each side; as a sibling the
+   * border spans the modal while the strip's own padding still positions the
+   * buttons. Passing this also flattens the header's border (they would otherwise
+   * draw two rules a row apart) and clears the body's padding, because a tabbed
+   * modal's panels own their padding and their scroll containers.
+   */
+  tabs?: React.ReactNode;
+  /**
+   * Layered surfaces such as `OverlayPane`, rendered as a sibling of the body.
+   *
+   * They cannot live in `children`: the body is `overflow: hidden`, which clips an
+   * absolutely-positioned descendant even though the containing block is `.modal`
+   * further up — so a pane rendered there covers only the area below the header.
+   */
+  overlays?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -58,7 +80,9 @@ export function ModalShell({
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className={styles.header}>
+        <header
+          className={`${styles.header} ${tabs ? styles.headerFlush : ""}`.trim()}
+        >
           <div className={styles.headerMain}>
             <div className={styles.eyebrowRow}>
               <div
@@ -87,7 +111,11 @@ export function ModalShell({
             </button>
           </div>
         </header>
-        <div className={styles.body}>{children}</div>
+        {tabs && <div className={styles.tabStrip}>{tabs}</div>}
+        <div className={`${styles.body} ${tabs ? styles.bodyFlush : ""}`.trim()}>
+          {children}
+        </div>
+        {overlays}
       </div>
     </div>
   );

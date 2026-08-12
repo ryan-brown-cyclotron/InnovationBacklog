@@ -1,7 +1,9 @@
 import type { ActivityEntry, Comment } from "../../domain/collaboration.js";
 import type { Adoption, IdeaSolutionLink, Participation } from "../../domain/engagement.js";
+import type { SolutionIssue } from "../../domain/feedback.js";
 import type { CurrentUser, UserRef } from "../../domain/identity.js";
 import type { Idea } from "../../domain/idea.js";
+import type { Milestone } from "../../domain/roadmap.js";
 import type { Solution } from "../../domain/solution.js";
 
 /**
@@ -30,6 +32,8 @@ export interface MemorySeed {
   participation: Participation[];
   links: IdeaSolutionLink[];
   activity: ActivityEntry[];
+  solutionIssues: SolutionIssue[];
+  milestones: Milestone[];
 }
 
 const USERS: UserRef[] = [
@@ -266,6 +270,65 @@ const ACTIVITY: ActivityEntry[] = [
     occurredAt: "2026-07-02T08:35:00Z" },
 ];
 
+/**
+ * Reported problems, all on s-201 so one solution exercises the whole tab.
+ *
+ * s-206 deliberately has none, so the served-but-empty state is reachable too — the
+ * one that must read "nobody has reported anything" rather than "we could not ask".
+ * ISS-703 is reported by the current user (u-avery), which is what makes the
+ * reporter-may-withdraw branch of `canSetIssueStatus` reachable in the UI.
+ */
+const SOLUTION_ISSUES: SolutionIssue[] = [
+  { id: "iss-701", solutionId: "s-201", title: "Focus ring is invisible on the dark surface tokens",
+    description: "The 2px outline resolves to the same value as the elevated background.",
+    status: "Doing", reportedBy: "u-harper", assignedTo: "u-avery",
+    createdAt: "2026-07-28T09:00:00Z", updatedAt: "2026-08-09T11:00:00Z" },
+  { id: "iss-702", solutionId: "s-201", title: "DataGrid drops its column widths after a re-render",
+    description: "Only when the grid is inside a flex parent with min-height: 0.",
+    status: "To Do", reportedBy: "u-devin", assignedTo: null,
+    createdAt: "2026-08-04T14:20:00Z", updatedAt: "2026-08-04T14:20:00Z" },
+  { id: "iss-703", solutionId: "s-201", title: "Add a changelog so adopters can see what moved",
+    description: "Two teams have been caught by a breaking prop rename.",
+    status: "To Do", reportedBy: "u-avery", assignedTo: null,
+    createdAt: "2026-08-07T08:10:00Z", updatedAt: "2026-08-07T08:10:00Z" },
+  { id: "iss-704", solutionId: "s-201", title: "Storybook build fails on Node 22",
+    description: "Resolved by pinning the vite plugin.",
+    status: "Done", reportedBy: "u-ellis", assignedTo: "u-avery",
+    createdAt: "2026-06-30T10:00:00Z", updatedAt: "2026-07-11T16:45:00Z" },
+  { id: "iss-705", solutionId: "s-202", title: "Token refresh races on a slow network",
+    description: "Two concurrent refreshes, second one 401s.",
+    status: "To Do", reportedBy: "u-casey", assignedTo: null,
+    createdAt: "2026-08-01T13:00:00Z", updatedAt: "2026-08-01T13:00:00Z" },
+];
+
+/**
+ * Roadmap entries. Between them these cover every rendering branch:
+ * an explicit `targetLabel` that must win over the date, a date-only entry that must
+ * fall back to formatting, and an undated entry that must sort last.
+ */
+const MILESTONES: Milestone[] = [
+  { id: "ms-801", solutionId: "s-201", title: "Design tokens split into their own package",
+    note: "Consumed by three apps without pulling in React.", status: "Shipped",
+    targetDate: "2026-05-01T00:00:00Z", targetLabel: "",
+    createdAt: "2026-03-01T09:00:00Z", updatedAt: "2026-05-06T09:00:00Z" },
+  { id: "ms-802", solutionId: "s-201", title: "Accessibility audit against WCAG 2.2 AA",
+    note: "Currently passing 41 of 46 checks.", status: "InProgress",
+    targetDate: "2026-09-01T00:00:00Z", targetLabel: "",
+    createdAt: "2026-06-12T09:00:00Z", updatedAt: "2026-08-10T09:00:00Z" },
+  { id: "ms-803", solutionId: "s-201", title: "Dark theme",
+    note: "Blocked on the token split landing everywhere.", status: "Planned",
+    targetDate: "2026-10-01T00:00:00Z", targetLabel: "Q4 2026",
+    createdAt: "2026-06-12T09:00:00Z", updatedAt: "2026-06-12T09:00:00Z" },
+  { id: "ms-804", solutionId: "s-201", title: "Figma kit kept in step automatically",
+    note: "No date until someone owns it.", status: "Planned",
+    targetDate: null, targetLabel: "",
+    createdAt: "2026-07-01T09:00:00Z", updatedAt: "2026-07-01T09:00:00Z" },
+  { id: "ms-805", solutionId: "s-201", title: "Ship a codemod for the v1 prop renames",
+    note: "Superseded by the changelog work.", status: "Cancelled",
+    targetDate: "2026-08-01T00:00:00Z", targetLabel: "",
+    createdAt: "2026-05-02T09:00:00Z", updatedAt: "2026-07-19T09:00:00Z" },
+];
+
 export function defaultSeed(): MemorySeed {
   return {
     currentUserId: "u-avery",
@@ -278,5 +341,7 @@ export function defaultSeed(): MemorySeed {
     participation: PARTICIPATION,
     links: LINKS,
     activity: ACTIVITY,
+    solutionIssues: SOLUTION_ISSUES,
+    milestones: MILESTONES,
   };
 }

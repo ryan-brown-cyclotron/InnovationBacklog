@@ -4,7 +4,11 @@ import type {
   IdeaKind,
   IdeaStatus,
   ItemVisibility,
+  Milestone,
+  MilestoneStatus,
   Solution,
+  SolutionIssue,
+  SolutionIssueStatus,
   SolutionKind,
   SolutionStatus,
 } from "@innovation-backlog/logic";
@@ -45,11 +49,35 @@ export const FIELDS = {
   areaPath: "System.AreaPath",
   workItemType: "System.WorkItemType",
 
+  parent: "System.Parent",
+
   decisionRationale: "Custom.InnovationBacklogDecisionRationale",
   solutionType: "Custom.InnovationBacklogSolutionType",
+  /**
+   * An EXISTING organization field, deliberately. It is not on any Basic work item
+   * type, but it exists org-wide, so attaching it claims no new permanent name in an
+   * organization shared with dozens of unrelated projects.
+   */
+  targetDate: "Microsoft.VSTS.Scheduling.TargetDate",
+  /** The one new name this feature claims. See Provision-AdoProcess.ps1. */
+  targetLabel: "Custom.InnovationBacklogTargetLabel",
 } as const;
 
-export const WIT = { idea: "Idea", solution: "Solution", backlogItem: "Backlog Item" } as const;
+export const WIT = {
+  idea: "Idea",
+  solution: "Solution",
+  backlogItem: "Backlog Item",
+  /**
+   * Basic's inherited `Issue`, re-enabled rather than replaced by a custom type.
+   *
+   * The trade-off, accepted knowingly: `Issue` carries Basic's
+   * `System.RequirementBacklogBehavior`, which an inherited type cannot be detached
+   * from, so adopter-reported issues appear on the delivery backlog alongside
+   * Backlog Item. See "Known gaps" in scripts/provisioning/README.md.
+   */
+  issue: "Issue",
+  milestone: "Milestone",
+} as const;
 
 /** Tag namespace for pipeline health. Solution type is a field, not a tag: it
  *  decides what the record consists of, so it needs constrained values. */
@@ -145,7 +173,17 @@ function visibilityFromArea(f: Record<string, unknown>): ItemVisibility {
 
 const HYPERLINK = "Hyperlink";
 export const RELATED = "System.LinkTypes.Related";
-const PARENT = "System.LinkTypes.Hierarchy-Reverse";
+/**
+ * Exported because issues and milestones hang off their Solution with it.
+ *
+ * Parent rather than Related for three reasons, one of which is a live bug avoided:
+ * `createWorkItemFacts` counts EVERY Related link as a linked idea, so a Related
+ * milestone would silently inflate `SolutionRollup.linkedNeeds`; Azure DevOps allows
+ * at most one parent, so a milestone cannot belong to two solutions; and
+ * `[System.Parent]` is a queryable WIQL field, so listing is one flat query rather
+ * than the expand-then-hydrate pair `listLinkedIdeas` needs.
+ */
+export const PARENT = "System.LinkTypes.Hierarchy-Reverse";
 
 export const LINK_LABEL = { repository: "Repository", demo: "Demo", canonical: "canonical" } as const;
 
@@ -296,6 +334,95 @@ export function toSolution(item: WorkItem): Solution {
     visibility: visibilityFromArea(f),
     tags: topicTags(tags),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Issues and milestones
+// ---------------------------------------------------------------------------
+
+/**
+ * Basic's `Issue` states, which the domain carries verbatim.
+ *
+ * Not renamed on the way through: state names are permanent in Azure DevOps, so the
+ * store's spelling is the only one that cannot change. The UI maps them to display
+ * labels ("Open", "In progress", "Done"), which costs nothing and is reversible.
+ */
+const ISSUE_STATES: readonly SolutionIssueStatus[] = ["To Do", "Doing", "Done"];
+
+/** `InProgress` in the domain, "In progress" in the process. */
+export const MILESTONE_STATE: Record<MilestoneStatus, string> = {
+  Planned: "Planned",
+  InProgress: "In progress",
+  Shipped: "Shipped",
+  Cancelled: "Cancelled",
+};
+
+const MILESTONE_STATUS_BY_STATE: Record<string, MilestoneStatus> = Object.fromEntries(
+  Object.entries(MILESTONE_STATE).map(([status, state]) => [state, status]),
+) as Record<string, MilestoneStatus>;
+
+export function toSolutionIssue(item: WorkItem, solutionId: string): SolutionIssue {
+  const f = item.fields;
+  const state = text(f, FIELDS.state) as SolutionIssueStatus;
+  const assignedTo = identity(f, FIELDS.assignedTo);
+
+  return {
+    id: String(item.id),
+    solutionId,
+    title: text(f, FIELDS.title),
+    description: text(f, FIELDS.description),
+    // An unrecognised state reads as open rather than as done — the safe direction
+    // for a feedback channel, where a wrongly-closed report is simply lost.
+    status: ISSUE_STATES.includes(state) ? state : "To Do",
+    reportedBy: identity(f, FIELDS.createdBy),
+    assignedTo: assignedTo || null,
+    createdAt: text(f, FIELDS.createdDate),
+    updatedAt: text(f, FIELDS.changedDate),
+  };
+}
+
+export function toMilestone(item: WorkItem, solutionId: string): Milestone {
+  const f = item.fields;
+
+  return {
+    id: String(item.id),
+    solutionId,
+    title: text(f, FIELDS.title),
+    note: text(f, FIELDS.description),
+    status: MILESTONE_STATUS_BY_STATE[text(f, FIELDS.state)] ?? "Planned",
+    targetDate: text(f, FIELDS.targetDate) || null,
+    targetLabel: text(f, FIELDS.targetLabel),
+    createdAt: text(f, FIELDS.createdDate),
+    updatedAt: text(f, FIELDS.changedDate),
+  };
+}
+
+/**
+ * Projections for the child types.
+ *
+ * Separate from LIST_FIELDS on purpose: every idea and solution list pays for that
+ * one, and neither needs a target date.
+ */
+export const ISSUE_FIELDS = [
+  FIELDS.id, FIELDS.title, FIELDS.description, FIELDS.state, FIELDS.parent,
+  FIELDS.assignedTo, FIELDS.createdBy, FIELDS.createdDate, FIELDS.changedDate,
+] as const;
+
+export const MILESTONE_FIELDS = [
+  FIELDS.id, FIELDS.title, FIELDS.description, FIELDS.state, FIELDS.parent,
+  FIELDS.targetDate, FIELDS.targetLabel, FIELDS.createdDate, FIELDS.changedDate,
+] as const;
+
+/**
+ * `[System.Parent] = 123` — an integer comparison, so `wiqlString` does not apply.
+ *
+ * Returns null for anything non-numeric rather than interpolating it: a domain id is
+ * a `string`, and dropping one unquoted into WIQL is an injection vector.
+ */
+export function parentClause(solutionId: string): string | null {
+  const parent = Number(solutionId);
+  if (!Number.isFinite(parent) || parent <= 0) return null;
+  return `[${FIELDS.parent}] = ${parent}`;
 }
 
 // ---------------------------------------------------------------------------

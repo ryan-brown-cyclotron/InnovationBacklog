@@ -67,6 +67,20 @@ export interface CreateSolutionInput {
 }
 
 /**
+ * Correcting a catalog entry after it was shared.
+ *
+ * Title is deliberately absent. A published entry's title is how people refer to it
+ * in comments and links, so renaming it is a different act from correcting a
+ * description that stopped being true — and only one of those belongs behind an
+ * inline "Edit" affordance. Adding `title?` later is source-compatible.
+ */
+export interface UpdateSolutionInput {
+  description?: string;
+  /** Replaces the whole set. `[]` clears them; `undefined` leaves them alone. */
+  tags?: string[];
+}
+
+/**
  * What a kind of solution actually consists of.
  *
  * The intake form is generated from this rather than hard-coding a field set, so a

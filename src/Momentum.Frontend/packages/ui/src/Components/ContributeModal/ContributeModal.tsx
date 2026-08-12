@@ -4,6 +4,7 @@ import styles from "./ContributeModal.module.scss";
 import type { ContributionKind } from "../../types";
 import { useApi } from "../../Hooks/useApi";
 import {
+  parseTags,
   SOLUTION_KINDS,
   solutionKindSpec,
   type SolutionKind,
@@ -49,11 +50,10 @@ export function ContributeModal({
     setBusy(true);
     setError(null);
     const data = new FormData(event.currentTarget);
-    // Comma-separated in, normalized server-side.
-    const tags = String(data.get("tags") ?? "")
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean);
+    // Comma-separated in. Normalized HERE, not server-side: the only host that
+    // exists writes System.Tags straight through, so a cap the client does not
+    // apply is a cap nothing applies.
+    const tags = parseTags(String(data.get("tags") ?? ""));
     try {
       if (kind === "solution") {
         const demoUrl = String(data.get("demoUrl") ?? "").trim();

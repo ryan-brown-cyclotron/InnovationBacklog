@@ -4,6 +4,8 @@ import type {
   HubItemType,
   InnovationBacklogProvider,
   ItemVisibility,
+  MilestoneStatus,
+  SolutionIssueStatus,
   SolutionKind,
 } from "@innovation-backlog/logic";
 import type { IService } from "@momentum/sdk";
@@ -275,6 +277,59 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
           return provider.engagement.listAdoptions(solutionId);
         }
 
+        if (third === "issues") {
+          const issues = provider.solutions.issues;
+          // Absent capability, not failure: App.tsx loads this through
+          // Promise.allSettled and hides the tab rather than banner-ing the modal.
+          if (!issues) throw new Error("This backend has no issues.");
+
+          if (method === "POST") {
+            return issues.createIssue(solutionId, {
+              title: str(body.title),
+              description: str(body.description),
+            });
+          }
+          if (method === "PATCH" && fourth) {
+            return issues.updateIssue(solutionId, fourth, {
+              title: str(body.title) || undefined,
+              description: str(body.description) || undefined,
+              status: (str(body.status) || undefined) as SolutionIssueStatus | undefined,
+            });
+          }
+          return issues.listIssues(solutionId);
+        }
+
+        if (third === "milestones") {
+          const roadmap = provider.solutions.roadmap;
+          if (!roadmap) throw new Error("This backend has no roadmap.");
+
+          if (method === "POST") {
+            return roadmap.createMilestone(solutionId, {
+              title: str(body.title),
+              note: str(body.note) || undefined,
+              targetDate: str(body.targetDate) || undefined,
+              targetLabel: str(body.targetLabel) || undefined,
+              status: (str(body.status) || undefined) as MilestoneStatus | undefined,
+            });
+          }
+          if (method === "DELETE" && fourth) {
+            await roadmap.deleteMilestone(solutionId, fourth);
+            return null;
+          }
+          if (method === "PATCH" && fourth) {
+            return roadmap.updateMilestone(solutionId, fourth, {
+              title: str(body.title) || undefined,
+              note: str(body.note) || undefined,
+              // `null` clears the date and must survive; only `undefined` means
+              // "leave it alone".
+              targetDate: body.targetDate === undefined ? undefined : str(body.targetDate) || null,
+              targetLabel: str(body.targetLabel) || undefined,
+              status: (str(body.status) || undefined) as MilestoneStatus | undefined,
+            });
+          }
+          return roadmap.listMilestones(solutionId);
+        }
+
         if (third === "accept") {
           return provider.approvals.acceptSolution(solutionId, str(body.rationale));
         }
@@ -284,6 +339,24 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
         if (third === "visibility" && method === "PATCH") {
           return setVisibility("Solution", solutionId, str(body.visibility) as ItemVisibility);
         }
+
+        /*
+          Guarded, and it must stay guarded.
+
+          Without this branch a bare `PATCH:solutions/123` fell through to the
+          getSolution below and returned HTTP 200 with the UNCHANGED record — a
+          mutation that silently read, and reported success for a save that never
+          happened. Mirrors the ideas branch above.
+        */
+        if (method === "PATCH" && !third) {
+          return provider.solutions.updateSolution(solutionId, {
+            description: str(body.description) || undefined,
+            // NOT `str(body.tags) || undefined`: that conflates "unchanged" with
+            // "cleared", and clearing every tag is a thing people do.
+            tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
+          });
+        }
+
         return provider.solutions.getSolution(solutionId);
       }
 

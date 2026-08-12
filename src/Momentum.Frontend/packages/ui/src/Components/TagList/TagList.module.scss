@@ -41,3 +41,47 @@
   color: var(--text-muted);
   cursor: default;
 }
+
+/*
+  A removable tag that is ALSO a search link.
+
+  The chip's border moves out here so the two controls read as one pill rather than
+  two adjacent ones — the inner button keeps its own hover, which is what tells you
+  the label and the × do different things.
+*/
+.tagEditable {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+
+  .tag {
+    border: 0;
+    background: transparent;
+    padding-right: 4px;
+  }
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 3px 8px 3px 2px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--danger);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+}

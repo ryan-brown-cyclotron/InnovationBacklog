@@ -1,4 +1,12 @@
-import { AppError, canReview } from "@innovation-backlog/logic";
+import {
+  AppError,
+  canEditSolution,
+  canReview,
+  canSetIssueStatus,
+  compareMilestones,
+  normalizeTags,
+  sameUser,
+} from "@innovation-backlog/logic";
 import type {
   ApprovalInbox,
   ApprovalsProvider,
@@ -27,20 +35,27 @@ import { addField } from "./client.js";
 import type { RollupReader } from "../dataverse/rollups.js";
 import {
   FIELDS,
+  ISSUE_FIELDS,
   LINK_LABEL,
   LIST_FIELDS,
+  MILESTONE_FIELDS,
+  MILESTONE_STATE,
+  PARENT,
   RELATED,
   STATE,
   TAG,
   WIT,
   encodeTags,
   getWorkItem,
+  parentClause,
   queryWorkItems,
   readTags,
   relatedItems,
   stateReachedAt,
   toIdea,
+  toMilestone,
   toSolution,
+  toSolutionIssue,
   withTag,
   wiqlString,
 } from "./workitems.js";
@@ -60,6 +75,14 @@ export interface ItemsOptions {
   client: AdoClient;
   rollups: RollupReader;
   role: () => Promise<Role>;
+  /**
+   * The signed-in user's UPN, for "am I the owner".
+   *
+   * Role alone cannot answer it: editing a solution is open to its owner as well as
+   * to reviewers, and nothing else in these options knows who the caller is. Null
+   * when identity has not resolved, which `sameUser` treats as "not me".
+   */
+  currentUserId: () => Promise<string | null>;
 }
 
 const SORT_COLUMN: Record<string, string> = {
@@ -288,7 +311,7 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
 // ---------------------------------------------------------------------------
 
 export function createSolutionsProvider(options: ItemsOptions): SolutionsProvider {
-  const { client, rollups, role } = options;
+  const { client, rollups, role, currentUserId } = options;
 
   async function fetchSolutions(query?: SolutionQuery): Promise<Solution[]> {
     // Now a real field, so kind filters are an equality clause rather than a
@@ -374,6 +397,43 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
       return rollups.solutions(ids ?? (await fetchSolutions()).map((s) => s.id));
     },
 
+    async updateSolution(id, patch) {
+      const current = await getWorkItem(client, id, "read solution for update");
+      await requireSolutionEditor(current);
+
+      const operations: ReturnType<typeof addField>[] = [];
+      if (patch.description !== undefined) {
+        operations.push(addField(FIELDS.description, patch.description));
+      }
+      if (patch.tags !== undefined) {
+        /*
+          Read-modify-write, and it matters.
+
+          `toSolution` hands the UI `topicTags(tags)`, which STRIPS namespaced
+          entries — so the array coming back here has never contained the
+          `pipeline:` tag. Writing it straight to System.Tags, which is one
+          delimited string holding both kinds, would delete pipeline health from
+          the work item every time somebody edited a topic tag.
+        */
+        const namespaced = readTags(current.fields).filter((tag) =>
+          Object.values(TAG).some((prefix) =>
+            tag.toLowerCase().startsWith(prefix.toLowerCase()),
+          ),
+        );
+        operations.push(
+          addField(FIELDS.tags, encodeTags([...normalizeTags(patch.tags), ...namespaced])),
+        );
+      }
+      if (operations.length === 0) return toSolution(current);
+
+      const updated = await client.patch<WorkItem>(
+        `_apis/wit/workitems/${encodeURIComponent(id)}`,
+        operations,
+        "update solution",
+      );
+      return toSolution(updated);
+    },
+
     async setSolutionVisibility(id, visibility: ItemVisibility) {
       await requireReviewer(role);
       const { project } = await client.context();
@@ -384,7 +444,229 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
       );
       return toSolution(updated);
     },
+
+    // -----------------------------------------------------------------------
+    // Issues — the inbound feedback channel
+    // -----------------------------------------------------------------------
+    issues: {
+      async listIssues(solutionId) {
+        const clause = parentClause(solutionId);
+        if (!clause) return [];
+
+        const items = await queryWorkItems(
+          client,
+          `SELECT [${FIELDS.id}] FROM WorkItems` +
+            ` WHERE [${FIELDS.workItemType}] = '${wiqlString(WIT.issue)}'` +
+            ` AND ${clause}` +
+            ` ORDER BY [${FIELDS.createdDate}] DESC`,
+          ISSUE_FIELDS,
+        );
+        return items.map((item) => toSolutionIssue(item, solutionId));
+      },
+
+      async createIssue(solutionId, input) {
+        if (!input.title.trim()) {
+          throw new AppError("An issue needs a title.", { category: "validation" });
+        }
+        // No role check by design: being able to see the solution is the gate, and
+        // area-path ACLs already enforce that. A stricter rule would defeat the
+        // point of an inbound channel.
+        const { organization } = await client.context();
+        const solution = await getWorkItem(client, solutionId, "read solution for issue");
+
+        const created = await client.patch<WorkItem>(
+          // The WIT name is interpolated into the path, so it is encoded — harmless
+          // for "Issue", but the next child type may well have a space in it.
+          `_apis/wit/workitems/$${encodeURIComponent(WIT.issue)}`,
+          [
+            addField(FIELDS.title, input.title.trim()),
+            addField(FIELDS.description, input.description ?? ""),
+            // Inherit the solution's area path, so an issue raised against an
+            // Approvers-only solution is not readable by everyone. Safe: anyone who
+            // could not see the solution never reaches this call.
+            addField(FIELDS.areaPath, String(solution.fields[FIELDS.areaPath] ?? "")),
+            addRelation(PARENT, workItemUrl(organization, solutionId)),
+          ],
+          "report an issue",
+        );
+        // No second call to set the state: "To Do" is the type's initial state.
+        return toSolutionIssue(created, solutionId);
+      },
+
+      async updateIssue(solutionId, issueId, patch) {
+        const [solution, issue] = await Promise.all([
+          getWorkItem(client, solutionId, "read solution for issue update"),
+          getWorkItem(client, issueId, "read issue"),
+        ]);
+
+        if (patch.status !== undefined) {
+          const me = await currentUserId();
+          const allowed = canSetIssueStatus(
+            patch.status,
+            await role(),
+            sameUser(ownerOf(solution), me),
+            sameUser(identityOf(issue, FIELDS.createdBy), me),
+          );
+          if (!allowed) {
+            throw new AppError("Only the solution owner can triage this issue.", {
+              category: "permission",
+            });
+          }
+        }
+
+        const operations = [
+          ...(patch.title !== undefined ? [addField(FIELDS.title, patch.title)] : []),
+          ...(patch.description !== undefined
+            ? [addField(FIELDS.description, patch.description)]
+            : []),
+          ...(patch.status !== undefined ? [addField(FIELDS.state, patch.status)] : []),
+        ];
+        if (operations.length === 0) return toSolutionIssue(issue, solutionId);
+
+        const updated = await client.patch<WorkItem>(
+          `_apis/wit/workitems/${encodeURIComponent(issueId)}`,
+          operations,
+          "update issue",
+        );
+        return toSolutionIssue(updated, solutionId);
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // Roadmap
+    // -----------------------------------------------------------------------
+    roadmap: {
+      async listMilestones(solutionId) {
+        const clause = parentClause(solutionId);
+        if (!clause) return [];
+
+        const items = await queryWorkItems(
+          client,
+          `SELECT [${FIELDS.id}] FROM WorkItems` +
+            ` WHERE [${FIELDS.workItemType}] = '${wiqlString(WIT.milestone)}'` +
+            ` AND ${clause}` +
+            // Cancelled is the tombstone deleteMilestone writes, so it never renders.
+            ` AND [${FIELDS.state}] <> '${wiqlString(MILESTONE_STATE.Cancelled)}'` +
+            ` ORDER BY [${FIELDS.targetDate}] ASC`,
+          MILESTONE_FIELDS,
+        );
+        // WIQL leaves null ordering unspecified, so undated milestones are placed
+        // here rather than wherever the server happened to put them.
+        return items.map((item) => toMilestone(item, solutionId)).sort(compareMilestones);
+      },
+
+      async createMilestone(solutionId, input) {
+        const { organization } = await client.context();
+        const solution = await getWorkItem(client, solutionId, "read solution for milestone");
+        await requireSolutionEditor(solution);
+
+        const created = await client.patch<WorkItem>(
+          `_apis/wit/workitems/$${encodeURIComponent(WIT.milestone)}`,
+          [
+            addField(FIELDS.title, input.title.trim() || "New milestone"),
+            addField(FIELDS.description, input.note ?? ""),
+            addField(FIELDS.areaPath, String(solution.fields[FIELDS.areaPath] ?? "")),
+            ...(input.targetDate ? [addField(FIELDS.targetDate, input.targetDate)] : []),
+            ...(input.targetLabel ? [addField(FIELDS.targetLabel, input.targetLabel)] : []),
+            addRelation(PARENT, workItemUrl(organization, solutionId)),
+          ],
+          "add a milestone",
+        );
+
+        // "Planned" is the initial state, so anything else needs a second patch.
+        if (input.status && input.status !== "Planned") {
+          const moved = await client.patch<WorkItem>(
+            `_apis/wit/workitems/${created.id}`,
+            [addField(FIELDS.state, MILESTONE_STATE[input.status])],
+            "set milestone status",
+          );
+          return toMilestone(moved, solutionId);
+        }
+        return toMilestone(created, solutionId);
+      },
+
+      async updateMilestone(solutionId, milestoneId, patch) {
+        await requireRoadmapEditor(solutionId);
+
+        const operations = [
+          ...(patch.title !== undefined ? [addField(FIELDS.title, patch.title)] : []),
+          ...(patch.note !== undefined ? [addField(FIELDS.description, patch.note)] : []),
+          ...(patch.status !== undefined
+            ? [addField(FIELDS.state, MILESTONE_STATE[patch.status])]
+            : []),
+          // `null` clears the date; `undefined` never reaches here.
+          ...(patch.targetDate !== undefined
+            ? [addField(FIELDS.targetDate, patch.targetDate ?? "")]
+            : []),
+          ...(patch.targetLabel !== undefined
+            ? [addField(FIELDS.targetLabel, patch.targetLabel)]
+            : []),
+        ];
+        if (operations.length === 0) {
+          return toMilestone(
+            await getWorkItem(client, milestoneId, "read milestone"),
+            solutionId,
+          );
+        }
+
+        const updated = await client.patch<WorkItem>(
+          `_apis/wit/workitems/${encodeURIComponent(milestoneId)}`,
+          operations,
+          "update milestone",
+        );
+        return toMilestone(updated, solutionId);
+      },
+
+      /**
+       * Soft, and not by preference.
+       *
+       * `AdoClient.send` speaks GET, POST and PATCH only — there is no DELETE verb to
+       * reach for — and destroying a work item outright is a heavier act than
+       * removing a line from a roadmap. Moving it to Cancelled takes it out of
+       * `listMilestones`, which is what "delete" means to the reader.
+       */
+      async deleteMilestone(solutionId, milestoneId) {
+        await requireRoadmapEditor(solutionId);
+        await client.patch<WorkItem>(
+          `_apis/wit/workitems/${encodeURIComponent(milestoneId)}`,
+          [addField(FIELDS.state, MILESTONE_STATE.Cancelled)],
+          "remove milestone",
+        );
+      },
+    },
   };
+
+  /** The owner as the panel sees it: assignee, else whoever shared it. */
+  function ownerOf(solution: WorkItem): string {
+    return identityOf(solution, FIELDS.assignedTo) || identityOf(solution, FIELDS.createdBy);
+  }
+
+  async function requireSolutionEditor(solution: WorkItem): Promise<void> {
+    const me = await currentUserId();
+    if (!canEditSolution(await role(), sameUser(ownerOf(solution), me))) {
+      throw new AppError("Only the owner or a reviewer can edit this solution.", {
+        category: "permission",
+      });
+    }
+  }
+
+  async function requireRoadmapEditor(solutionId: string): Promise<void> {
+    await requireSolutionEditor(
+      await getWorkItem(client, solutionId, "read solution for roadmap"),
+    );
+  }
+}
+
+/** `System.AssignedTo` and friends arrive as an object; uniqueName is the handle. */
+function identityOf(item: WorkItem, field: string): string {
+  const value = item.fields[field];
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const person = value as { uniqueName?: unknown; displayName?: unknown };
+    if (person.uniqueName) return String(person.uniqueName);
+    if (person.displayName) return String(person.displayName);
+  }
+  return "";
 }
 
 // ---------------------------------------------------------------------------

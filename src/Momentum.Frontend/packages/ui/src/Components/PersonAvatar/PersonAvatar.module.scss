@@ -11,6 +11,19 @@
   color: var(--brand-text);
 }
 
+/* Opt-in only. The base class stays sizeless so AvatarStack is unaffected. */
+.avatarsm {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.avatarmd {
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+}
+
 .avataruser {
   background: var(--brand-soft);
   color: var(--brand-text);

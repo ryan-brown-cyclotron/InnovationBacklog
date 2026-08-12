@@ -13,7 +13,7 @@ import {
   HIDDEN_ACTIVITY_ACTIONS,
 } from "../../utils";
 
-type TimelineItem =
+export type TimelineItem =
   | { kind: "comment"; id: string; time: string; comment: Comment }
   | { kind: "activity"; id: string; time: string; activity: ActivityRecord }
   | { kind: "decision"; id: string; time: string; decision: AcceptanceDecision };
@@ -33,6 +33,64 @@ const DECISION_ACTIONS = new Set([
   "solution.rejected",
 ]);
 
+/**
+ * The rows this component will actually render, merged and ordered.
+ *
+ * Exported because a caller that wants to COUNT them — a tab badge, say — must count
+ * the same rows the feed shows. Deriving a count independently drifts the moment
+ * `HIDDEN_ACTIVITY_ACTIONS`, the `comment.added` de-dup, or the decision-supersedes
+ * rule below changes, and it drifts silently.
+ */
+export function buildTimeline(
+  comments: Comment[],
+  activity: ActivityRecord[],
+  decisions: AcceptanceDecision[] = [],
+): TimelineItem[] {
+  const items: TimelineItem[] = comments.map((comment) => ({
+    kind: "comment",
+    id: `comment-${comment.id}`,
+    time: comment.createdAt,
+    comment,
+  }));
+  // comment.added rows are redundant with the actual comments above; the rest
+  // are the feed-wide exclusions.
+  for (const record of activity) {
+    if (record.action === "comment.added") continue;
+    if (HIDDEN_ACTIVITY_ACTIONS.has(record.action)) continue;
+    // Only when a decision record is actually present to replace it — a reader who
+    // cannot see decisions still needs to know the idea was approved.
+    if (decisions.length > 0 && DECISION_ACTIONS.has(record.action)) continue;
+    items.push({
+      kind: "activity",
+      id: `activity-${record.id}`,
+      time: record.occurredAt,
+      activity: record,
+    });
+  }
+
+  for (const decision of decisions) {
+    items.push({
+      kind: "decision",
+      id: `decision-${decision.id}`,
+      time: decision.decidedAt,
+      decision,
+    });
+  }
+
+  /*
+   * Oldest first, newest at the bottom.
+   *
+   * This is a conversation, and the composer sits underneath it — so a
+   * newest-first order put the reply box furthest from the message being replied
+   * to and made the thread read backwards. Reverse-chronological is right for a
+   * FEED, where the reader wants the latest and never scrolls to the beginning;
+   * it is wrong for a thread with a beginning, which this has.
+   */
+  return items.sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+  );
+}
+
 export function TimelineItems({
   comments,
   activity,
@@ -51,51 +109,10 @@ export function TimelineItems({
   decisions?: AcceptanceDecision[];
   emptyText?: string;
 }): React.ReactElement {
-  const timeline = useMemo<TimelineItem[]>(() => {
-    const items: TimelineItem[] = comments.map((comment) => ({
-      kind: "comment",
-      id: `comment-${comment.id}`,
-      time: comment.createdAt,
-      comment,
-    }));
-    // comment.added rows are redundant with the actual comments above; the rest
-    // are the feed-wide exclusions.
-    for (const record of activity) {
-      if (record.action === "comment.added") continue;
-      if (HIDDEN_ACTIVITY_ACTIONS.has(record.action)) continue;
-      // Only when a decision record is actually present to replace it — a reader who
-      // cannot see decisions still needs to know the idea was approved.
-      if (decisions.length > 0 && DECISION_ACTIONS.has(record.action)) continue;
-      items.push({
-        kind: "activity",
-        id: `activity-${record.id}`,
-        time: record.occurredAt,
-        activity: record,
-      });
-    }
-
-    for (const decision of decisions) {
-      items.push({
-        kind: "decision",
-        id: `decision-${decision.id}`,
-        time: decision.decidedAt,
-        decision,
-      });
-    }
-
-    /*
-     * Oldest first, newest at the bottom.
-     *
-     * This is a conversation, and the composer sits underneath it — so a
-     * newest-first order put the reply box furthest from the message being replied
-     * to and made the thread read backwards. Reverse-chronological is right for a
-     * FEED, where the reader wants the latest and never scrolls to the beginning;
-     * it is wrong for a thread with a beginning, which this has.
-     */
-    return items.sort(
-      (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-    );
-  }, [comments, activity, decisions]);
+  const timeline = useMemo(
+    () => buildTimeline(comments, activity, decisions),
+    [comments, activity, decisions],
+  );
 
   return (
     <div className={styles.timeline}>
