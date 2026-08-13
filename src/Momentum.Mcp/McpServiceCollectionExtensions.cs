@@ -8,6 +8,7 @@ using Momentum.Library.Application.Skills;
 using Momentum.Library.Infrastructure.AzureDevOps;
 using Momentum.Mcp.Auth;
 using Momentum.Mcp.Backends;
+using Momentum.Mcp.Backlog;
 using Momentum.Mcp.Configuration;
 
 namespace Momentum.Mcp;
@@ -70,9 +71,26 @@ public static class McpServiceCollectionExtensions
         services.AddKeyedSingleton(DownstreamResource.AzureDevOps, (provider, _) =>
             CreateClient(provider, AzureDevOpsClientName, DownstreamResource.AzureDevOps));
 
+        AddBacklogTools(services);
         AddSkillIntake(services);
 
         return services;
+    }
+
+    /// <summary>
+    /// The domain tool surface's readers.
+    /// </summary>
+    /// <remarks>
+    /// Singletons: all three are stateless over the keyed HTTP clients, and the caller is
+    /// threaded through every method rather than captured — which is what makes sharing one
+    /// instance across sessions safe. The only state involved is
+    /// <see cref="MetadataCatalog"/>'s cache, and what it holds is schema, not rows.
+    /// </remarks>
+    private static void AddBacklogTools(IServiceCollection services)
+    {
+        services.AddSingleton<BacklogRepository>();
+        services.AddSingleton<EngagementReader>();
+        services.AddSingleton<MetadataCatalog>();
     }
 
     /// <summary>

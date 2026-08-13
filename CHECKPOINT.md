@@ -1,139 +1,175 @@
-# CHECKPOINT — 2026-08-12
+# CHECKPOINT — 2026-08-13
 
-## Done: .NET 10 + Aspire 13.4.6
+## Done: the MCP tool surface
 
-The previous checkpoint called for .NET 9 → 10 and "Aspire 8.2.2 → 9.0+". Two things
-it had wrong, both now settled:
+`src/Momentum.Mcp` had one tool (`whoami`) and no domain surface. It now has the four the
+last checkpoint specified, driven end to end over the real protocol (`initialize` →
+`tools/list` → `tools/call`) against `http://localhost:7071/runtime/webhooks/mcp`:
 
-- **Aspire's current release is 13.4.6**, not 9.x — that line was re-versioned.
-- **`Momentum.AppHost` could not build at all.** Not a warning: `aspire.hosting.apphost/8.2.2`
-  raises `ASPIRE005` when `$(AspireHostingSDKVersion)` is unset, and it was unset
-  because the workload is gone from .NET 9+ SDKs and this repo never adopted the NuGet
-  SDK that replaced it. The `Projects.Momentum_*` metadata classes were never generated
-  either, so `Program.cs` had nothing to compile against.
+| Tool | Answers from | Shape |
+|---|---|---|
+| `search(facet, query)` | ADO | WIQL `CONTAINS WORDS` over title **and** description |
+| `list(facet, status?, tag?)` | ADO | Tags ride inside WIQL, no tagging endpoint |
+| `get(facet, id)` | ADO **+** Dataverse | Work item, relations, and engagement |
+| `describe(facet)` | ADO | States, tags, fields — cached server-wide |
 
-Aspire 13 changed the AppHost project shape again — the 9.x `<Sdk Name=… />` child
-element became a project-level SDK, and it supplies `Aspire.Hosting.AppHost` implicitly:
+New code is `src/Momentum.Mcp/Backlog/` (facet vocabulary, WIQL builder, the two-hop
+repository, engagement reader, mapper, metadata catalog), `Backends/BackendStatus.cs` and
+`Backends/BackendJson.cs` (extracted from `DiagnosticsTool`, which four tools now share),
+and `Tools/BacklogTools.cs`. 0 warnings, 229 tests passing.
 
-```xml
-<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
-```
+**Verified:** `tools/list` returns five tools with correct input schemas; malformed
+arguments come back as a sentence naming the valid values rather than an exception; a
+backend failure is reported per backend instead of failing the call.
 
-That version is inline and **cannot be centralised** — MSBuild resolves it before
-`Directory.Packages.props` is read. Bump it by hand alongside the Aspire packages.
+**Not verified: any query against live data.** See the blocker below. No WIQL has ever
+executed — which specifically means `CONTAINS WORDS` is unproven. If full-text search is not
+enabled on that collection, Azure DevOps rejects the operator with a 400 and `search`
+surfaces the error body. First thing to check when auth works.
 
-Also: the `mcp` resource was wired with `AddProject`, which runs the isolated worker
-executable directly. The worker does not serve `/runtime/webhooks/mcp` — the Functions
-*host* does — so that resource had never served anything. It now launches Core Tools
-via `AddExecutable`, mirroring the `frontend` resource. `AddAzureFunctionsProject` is
-the tidier model but provisions Azurite as a container; this dev loop runs Azurite via
-npx, so that swap waits.
+### Three findings worth not rediscovering
 
-**Verified:** clean restore, `dotnet build Momentum.slnx` with 0 warnings, 124 tests
-passing, AppHost dashboard up with `service` and `mcp` both live.
+1. **`McpToolProperty`'s second argument is the DESCRIPTION, not the type.** The JSON type
+   comes from the parameter's CLR type and is emitted as `dataType`. The attribute also has
+   a `Description` property, and setting both writes `description` twice into
+   `functions.metadata`. The mistake compiles and deploys; it shows up only as a tool whose
+   argument is described as "string". Also: the generator emits no `dataType` at all for an
+   `int?`, so every tool argument here is a `string` and ids are parsed in the body.
+2. **`cycai_momentum` is NOT the read, and the last checkpoint was wrong to say so.**
+   Nothing has ever written to that table — no plugin, flow or worker — and the code app was
+   moved off it for exactly that reason after every count came back zero
+   ([`rollups.ts:9-29`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/dataverse/rollups.ts#L9-L29)).
+   `EngagementReader` computes counts live from `cycai_vote`, `cycai_adoption` and
+   `cycai_participation`, and reads `cycai_momentum` for **demand rank only** — a
+   whole-catalogue ordering genuinely is not a live query per item. Absent row means
+   `demandRank: null` with the reason attached, never a zero that reads as fact.
+3. **A facet is "idea" outside and `request:` inside.** The Dataverse engagement key for an
+   idea is `request:123`, because the domain type is `HubItemType.Request`. Getting this
+   wrong returns zero votes for every idea — plausible, and always wrong.
 
-## Done: MCP server foundation
+### One decision to revisit
 
-`src/Momentum.Mcp` was five files and no `[Function]` at all. It is now a working
-server — Functions MCP extension 1.6.0, streamable HTTP, one tool — verified by
-driving the real protocol (`initialize` → `tools/list` → `tools/call`) against
-`http://localhost:7071/runtime/webhooks/mcp`.
-
-What is built is the floor, not the surface: options binding, the on-behalf-of token
-provider, per-caller/per-resource token caching, one HTTP client per backend, and
-`whoami` as a smoke test. No domain tools yet — that is the next section.
-
-Three findings worth not rediscovering:
-
-1. **MCP tool calls never touch the worker's ASP.NET Core pipeline**, so there is no
-   `HttpContext` to read the caller from. The inbound token is reachable only via
-   `ToolInvocationContext.TryGetHttpTransport(…).Headers`. `CallerContext` reads it
-   there and is threaded through explicitly rather than held in ambient state.
-2. **OBO is an explicit MSAL `AcquireTokenOnBehalfOf`** against `Microsoft.Identity.Client`,
-   not `Microsoft.Identity.Web` — the latter's conveniences hang off an ASP.NET Core
-   auth pipeline a Functions worker has not got.
-3. **`Microsoft.ApplicationInsights.WorkerService` is pinned to 2.23.0 deliberately.**
-   3.x removed `ITelemetryInitializer`, which the Functions adapter still binds
-   against, and the worker dies at startup with a `TypeLoadException`. Move both
-   together or not at all.
-
-Azure DevOps refuses a request it cannot place with a **302 to an HTML sign-in page**,
-not a 401 — confirmed against the live service, with `Accept: application/json` set.
-Followed, that redirect returns `200 text/html` and the auth failure surfaces as a JSON
-parse error pointing at `'<'`. Auto-redirect is off on the ADO client, and both
-backends' error *bodies* are surfaced, because that is where the diagnostic lives:
-
-```
-azureDevOps  reachable: false  401 — VS403318: <user> has not accepted the invitation
-                               to the Cyclotron Inc. organization.
-dataverse    reachable: true   systemuserid c2c73a3d-…
-```
-
-That asymmetric result is the design working, not a half-failure — see the contract
-below.
-
-`scripts/provisioning/Provision-McpAppRegistration.ps1` provisions the Entra
-registration. It resolves the downstream scope ids rather than hardcoding them, so a
-missing Dataverse service principal fails immediately instead of becoming an opaque
-consent error later. Admin consent and enabling App Service Authentication are printed
-as follow-ups, not attempted. **Not yet run against a real tenant.**
+The catalogue clause does **not** resolve the caller's role, so an Approver using an agent
+does not see other people's solutions awaiting approval; the code app shows them. Rationale
+in [`Wiql.cs`](src/Momentum.Mcp/Backlog/Wiql.cs): role resolution is three extra Azure
+DevOps round trips per call, and the error direction matters — a reviewer seeing one row
+fewer is cheaper than a disclosure. `@Me` keeps the author exception either way.
 
 ---
 
-## Next: the tool surface
+## Blocker: neither backend authenticates
 
-Tools speak the **domain's vocabulary**, not CRUD. The agent should ask for an idea or
-a solution, never for a work item type filter or an OData `$filter`. Each tool fans out
-internally to whichever backend holds the answer.
-
-The primary discovery surface is faceted search:
+Both refuse as of today, and it is environmental — proved with plain `curl` and an `az`
+token, bypassing the server:
 
 ```
-search(facet: "idea" | "solution", query: string)
+GET https://dev.azure.com/CyclotronInc/_apis/projects   302  (redirect to sign-in)
+GET https://org9ceb01a6.crm.dynamics.com/.../WhoAmI     403  0x80072560
+                                                        "The user is not a member of the organization."
 ```
 
-One call, one contract, regardless of how many round trips it costs underneath. The
-facet selects the work item type; the query is free text. Everything else follows from
-that shape:
+A regression against the last checkpoint, which recorded ADO 401/`VS403318` and Dataverse
+**reachable** (`systemuserid c2c73a3d-…`). Signed-in CLI identity is
+`Ryan.Brown@cyclotron.com`, tenant `b9894c34`. ADO no longer reaches 401, so this is not
+just the unaccepted org invitation. Suspect the CLI is authenticating against the wrong
+tenant, or access was withdrawn.
 
-| Tool | Answers from | Notes |
+Everything below the token layer is exercised; nothing above it is.
+
+---
+
+## Next: opening a solution costs 14 calls
+
+Measured from `apps.powerapps.com.har`, opening solution **4462**: **14 data calls**
+(4 telemetry beacons excluded), **3763ms wall**, **7152ms of summed request time**.
+
+The shape matters more than the count. It is **four sequential waves**, not fourteen serial
+calls — so the cost is waterfall *depth* plus one very slow call:
+
+```
+wave 0   t=0      1 call    468ms   getSolution — workitems/4462?$expand=relations
+wave 1   t=1000   1 call   1557ms   workitems/4462/revisions          <- longest single call
+wave 2   t=2000   9 calls   598ms   the six-way Promise.allSettled, fanned out
+wave 3   t=3000   3 calls   763ms   the two-hop's second leg
+```
+
+Wave 2 is [`App.tsx:211-220`](src/Momentum.Frontend/packages/ui/src/App.tsx#L211-L220) —
+`/requests`, `/comments`, `/activity`, `/use`, `/issues`, `/milestones` in parallel. Those
+six become nine calls, and produce ids that wave 3 then has to hydrate.
+
+### What is actually wasted
+
+**`workitems/4462?$expand=relations` is fetched three times**, identically, by three call
+sites that never learn of each other:
+
+| # | Call site | Reached via |
 |---|---|---|
-| `search(facet, query)` | ADO | WIQL `CONTAINS WORDS` over title/description, filtered by type |
-| `list(facet, status?, tag?)` | ADO | Tags ride inside WIQL — `[System.Tags] CONTAINS 'x'`. No separate endpoint |
-| `get(facet, id)` | ADO **+** Dataverse | Work item, plus its engagement rollup |
-| `describe(facet)` | ADO | States, fields, and tags that exist, so the model builds valid filters instead of guessing |
+| 1 | [`items.ts:373`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/ado/items.ts#L373) `getSolution` | `/api/solutions/{id}` |
+| 2 | [`items.ts:407`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/ado/items.ts#L407) `listLinkedIdeas` | `/requests` |
+| 3 | [`comments.ts:75`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/ado/comments.ts#L75) attachment relations | `/comments` |
 
-**Bake the two-hop into every ADO tool.** Azure DevOps querying is WIQL → *ids only* →
-batch-hydrate by id, regardless of the SELECT list. That asymmetry against Dataverse's
-single OData request is plumbing, and the agent should never see it.
+**`systemusers?$select=…&$filter=(systemuserid eq 'c2c73a3d-…')` is fetched twice**, byte
+for byte — once resolving activity actors, once resolving adoption starters. Same GUID, two
+requests, no shared resolution.
 
-**Engagement comes from Dataverse, and `cycai_momentum` is the read.** Votes, adoptions
-and participation are keyed by `systemuserid`, and the precomputed rollup exists because
-FetchXML aggregates cannot order by an aggregate value — demand rank is not a live
-query. `get` is where the two stores meet; `search` and `list` should not pay for the
-join.
+**Three `workitemsbatch` POSTs each carry exactly one id** — `[4472]` (issue), `[4454]`
+(linked idea), `[4473]` (milestone) — with three different field projections. That is the
+whole of wave 3: 1923ms of summed time to fetch three work items.
 
-**Every tool reports per-backend reachability rather than failing whole.** The two
-grants are independent: a caller with a Dataverse role but no ADO project membership
-gets one answer and one 403. `whoami` already sets this precedent and is the tool to
-reach for when data looks missing — it distinguishes "you have no access" from "there
-is nothing there", which no other tool can.
+**Two WIQL queries differ only by work item type.** Both are `[System.Parent] = 4462`, one
+for `Issue` and one for `Milestone`.
 
-**Cache metadata, never results.** `describe` output is org- and schema-level and is
-safely cached server-wide. Everything `search`, `list`, and `get` return reflects
-row-level access and must never be cached across users.
+**Every Dataverse read is its own `$batch` POST containing a single GET.** Four batch
+requests, four single-statement batches.
 
-Write tools stay out of scope and, when they arrive, arrive separately and gated.
+### The plan, in order of value
+
+1. **A per-page-open request cache at the provider seam.** Keyed on method + URI + body,
+   living for one open rather than for the session — engagement must not be cached across
+   readers or across time. Fixes the three work-item reads and the two `systemusers` reads
+   with one mechanism: **14 → 11**, no call-site changes.
+2. **Get `revisions` off the critical path.** It costs 1557ms and 16KB to produce one date,
+   `publishedAt`, via `stateReachedAt`. Two independent moves: switch to
+   `_apis/wit/workitems/{id}/updates`, which returns field *deltas* rather than whole
+   snapshots and is a fraction of the payload; and load it lazily instead of before the
+   panel renders. Removes wave 1 entirely.
+3. **Coalesce the two-hop's second leg.** A microtask-batching loader that collects ids
+   requested within a tick and issues one `workitemsbatch` with the union of the
+   projections. **3 calls → 1**, and wave 3 stops being three round trips wide. This is the
+   structural fix; note `workitemsbatch` takes one `fields` array for the whole request, so
+   the union is a slightly heavier payload per item in exchange for two fewer round trips.
+4. **Merge the two child WIQL queries** into one `[System.Parent] = 4462 AND
+   [System.WorkItemType] IN ('Issue','Milestone')` and split the rows by type client-side.
+   Ordering is already re-done client-side for milestones — `listMilestones` re-sorts with
+   `compareMilestones` because WIQL leaves null ordering unspecified — so nothing is lost.
+   **2 → 1**.
+5. **Investigate real Dataverse batching.** Multi-GET `$batch` is exactly what the four
+   single-GET batches want, but the generated services build one batch per operation and
+   `IGetAllOptions` has no seam for it. Establish whether this is reachable through the SDK
+   before designing around it.
+
+Target: **14 calls → 7**, and the waterfall from four waves to two. Worth it beyond the
+3.7s: the connector's budget is **300 calls per 60 seconds**, so 14 calls per open caps a
+reader at roughly twenty solutions a minute before throttling — and that budget is shared
+with every list, search and rollup on the page behind the panel.
+
+### The MCP server has an advantage here, and should keep it
+
+`BacklogTools.Get` is already 2 waves and at most 6 calls — one work item, one hydration of
+its links, four Dataverse reads fired in parallel. It should stay that way, and it has a
+lever the code app does not: it speaks the Dataverse Web API directly rather than through
+the generated services, so `$batch` with several GETs **is** available to it. Folding
+`EngagementReader`'s four reads into one batch is the obvious next optimization on that side
+and has no SDK constraint in the way.
 
 ---
 
 ## Standing decision: what a person is
 
-Unchanged and still unbuilt — `view === "people"` renders a placeholder. Recorded here
-because the answer looks arbitrary until you see which id each store actually holds.
+Unchanged and still unbuilt — `view === "people"` renders a placeholder. Recorded because
+the answer looks arbitrary until you see which id each store holds.
 
-Person identity is **the ADO identity (UPN), not the Dataverse GUID.** No cross-store
-join.
+Person identity is **the ADO identity (UPN), not the Dataverse GUID.** No cross-store join.
 
 | Store | Key | What is keyed by it |
 |-------|-----|---------------------|
@@ -142,47 +178,38 @@ join.
 
 `CurrentUser.id` is the ADO identity, and that is load-bearing —
 [`dataverse/identity.ts:90-103`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/dataverse/identity.ts#L90-L103)
-says so at length. Every "is this mine?" comparison the UI makes is against a value
-that came off a work item, so putting the GUID there would make those comparisons never
-match and would silently hide every ownership affordance. The GUID stays reachable
-separately through `currentSystemUserId()` for stamping Dataverse writes.
+says so at length. Every "is this mine?" comparison the UI makes is against a value that
+came off a work item, so putting the GUID there would make those comparisons never match
+and silently hide every ownership affordance. The GUID stays reachable separately through
+`currentSystemUserId()` for stamping Dataverse writes.
 
-**There is no user directory on either host.** No `IUserRepository`, no `/api/people`,
-no `AppUser` table — and the Dashboard already explains the consequence to users:
-["No user directory on this backend, so there is no denominator"](src/Momentum.Frontend/packages/ui/src/Pages/Dashboard/Dashboard.tsx#L125).
-**People are always derived, never looked up.** A directory is a distinct-values pass
-over rows the app already fetches, not a table read — ideas, solutions and comments
-carry the person key inline.
-
-`resolveUsers` goes **one way: GUID → name and email**
-([`identity.ts:136-154`](src/Momentum.Frontend/apps/code-innovation-backlog/src/provider/dataverse/identity.ts#L136-L154)).
-A UPN passed in is discarded before the query runs. So ADO-keyed data (ideas, solutions,
-comments) is directly usable; Dataverse-keyed data (votes, adoptions, activity) can be
-*projected onto* an ADO identity but not *filtered by* one.
+**There is no user directory on either host.** People are always derived, never looked up —
+a distinct-values pass over rows the app already fetches. `resolveUsers` goes **one way:
+GUID → name and email**; a UPN passed in is discarded before the query runs. So ADO-keyed
+data is directly usable, and Dataverse-keyed data can be *projected onto* an ADO identity
+but not *filtered by* one.
 
 Known gaps when People is picked up:
 
-1. **Display names are being thrown away.** `identity()` returns `uniqueName` and only
-   falls back to `displayName`, so the friendly name arriving on the same ADO identity
-   object is discarded. That is the cheapest source of display names there is — no
-   Dataverse round trip, no Entra. Capturing both is a small change at one helper.
-   Without it an ADO-derived person list is UPNs and nothing else, because
-   `resolveUsers` cannot name it.
-2. **No actor-scoped activity query.** `ActivityQuery` has no `actorId`, in the domain
-   type, any provider, or the REST surface; `IAuditRepository` has `GetBySubject` and
-   `GetRecent` and no `GetByActor`.
-3. **No single-person rollup.** `rankContributors` proves the tally is computable, but
-   it is a whole-table scan truncated to a leaderboard, not a lookup by id.
+1. **Display names are being thrown away** in the code app: `identity()` returns
+   `uniqueName` and only falls back to `displayName`. The MCP server no longer does this —
+   `WorkItems.Identity` captures both, because they arrive on the same object and it is the
+   cheapest source of a friendly name there is. The code app still needs the same change,
+   or an ADO-derived person list is UPNs and nothing else.
+2. **No actor-scoped activity query.** `ActivityQuery` has no `actorId` in the domain type,
+   any provider, or the REST surface; `IAuditRepository` has `GetBySubject` and `GetRecent`
+   and no `GetByActor`.
+3. **No single-person rollup.** `rankContributors` proves the tally is computable, but it is
+   a whole-table scan truncated to a leaderboard, not a lookup by id.
 4. **Email ids need URL encoding through the route seam.** `callTool.ts` does
    `path.split("/")` without decoding, so a percent-encoded UPN arrives still encoded.
 
-Out of scope: rich profile fields (no avatar, team, title, department) and any
-cross-store identity join.
+Out of scope: rich profile fields and any cross-store identity join.
 
 ---
 
 ## Known config drift
 
 `src/Momentum.Contracts/tgconfig.json` and the root `Dockerfile` still name `net9.0` /
-`sdk:9.0`. Left deliberately, but the TypeGen path now points at an assembly that no
-longer exists, and it fails quietly rather than loudly.
+`sdk:9.0`. Left deliberately, but the TypeGen path now points at an assembly that no longer
+exists, and it fails quietly rather than loudly.

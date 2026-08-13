@@ -12,5 +12,14 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Momentum.Library\Momentum.Library.Domain\Momentum.Library.Domain.csproj" />
     <ProjectReference Include="..\..\src\Momentum.Library\Momentum.Library.Application\Momentum.Library.Application.csproj" />
+    <!--
+      The MCP server is an executable, so the reference is marked as a plain library
+      dependency: without this the Functions worker SDK treats the test host as a second
+      Functions app and generates a conflicting entry point.
+    -->
+    <ProjectReference Include="..\..\src\Momentum.Mcp\Momentum.Mcp.csproj">
+      <Private>true</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 </Project>
