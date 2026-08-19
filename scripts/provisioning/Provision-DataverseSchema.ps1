@@ -57,6 +57,10 @@ param(
 
     [string]$AdoProjectId,
 
+    # Entra tenant the environment belongs to. Discovered from the environment's own
+    # 401 challenge when omitted — see Get-DataverseTenant.
+    [string]$Tenant,
+
     [string]$AccessToken
 )
 
@@ -71,6 +75,50 @@ $script:SolutionUniqueName = $SolutionName
 # ---------------------------------------------------------------------------
 
 <#
+    Which tenant the environment trusts, asked of the environment itself.
+
+    A Dataverse org answers an unauthenticated request with a 401 and a WWW-Authenticate
+    header naming its own authorization_uri, so the tenant never has to be supplied or
+    guessed:
+
+        Bearer authorization_uri=https://login.microsoftonline.com/<tenant>/oauth2/authorize
+
+    This exists because getting it wrong is nearly undiagnosable. A token minted for the
+    wrong tenant is a perfectly valid token, so Dataverse does not answer 401 — it answers
+    403 `0x80072560`, "The user is not a member of the organization", which reads as
+    "your access was removed" rather than "you asked the wrong directory". That sent a
+    previous session hunting for a revoked invitation for a whole checkpoint.
+
+    Returns $null rather than throwing: discovery is an optimisation, and a caller that
+    can already mint a working token should not be blocked by a probe.
+#>
+function Get-DataverseTenant {
+    param([Parameter(Mandatory = $true)][string]$Resource)
+
+    try {
+        Invoke-WebRequest -Uri "$Resource/api/data/v9.2/WhoAmI" -Method Get -ErrorAction Stop | Out-Null
+        return $null  # Unauthenticated success is not a thing here, but do not assume.
+    }
+    catch {
+        $header = $null
+        try {
+            $values = $_.Exception.Response.Headers.GetValues("WWW-Authenticate")
+            if ($values) { $header = $values -join " " }
+        }
+        catch { }
+        if (-not $header) {
+            # PowerShell 7 exposes headers as a key/value collection instead.
+            $pair = $_.Exception.Response.Headers | Where-Object { $_.Key -eq "WWW-Authenticate" }
+            if ($pair) { $header = ($pair.Value -join " ") }
+        }
+        if ($header -match "login\.microsoftonline\.com/([0-9a-fA-F-]{36})") {
+            return $Matches[1]
+        }
+        return $null
+    }
+}
+
+<#
     Three token sources, in order of preference:
 
       1. -AccessToken, for CI where a token is minted upstream.
@@ -78,18 +126,44 @@ $script:SolutionUniqueName = $SolutionName
          and `az login` persists, so this is usually non-interactive.
       3. Az PowerShell, for machines that have the module but not the CLI.
 
-    Whichever is used, the token must be scoped to the environment URL itself —
-    Dataverse is its own resource, not Azure Resource Manager.
+    Whichever is used, the token must be scoped to the environment URL itself — Dataverse
+    is its own resource, not Azure Resource Manager — AND to the tenant that environment
+    belongs to. The tenant is not optional detail: an identity can be signed in to several
+    directories, and `az` mints for whichever one happens to be active.
 #>
 function Get-DataverseToken {
-    param([Parameter(Mandatory = $true)][string]$Resource)
+    param(
+        [Parameter(Mandatory = $true)][string]$Resource,
+        [string]$TenantId
+    )
 
     if (Get-Command az -ErrorAction SilentlyContinue) {
-        $token = az account get-access-token --resource $Resource --query accessToken -o tsv 2>$null
+        # Not $args: that is an automatic variable, and assigning to it inside a function
+        # shadows the caller's arguments.
+        $azArgs = @("account", "get-access-token", "--resource", $Resource, "--query", "accessToken", "-o", "tsv")
+        if ($TenantId) { $azArgs += @("--tenant", $TenantId) }
+
+        $token = & az @azArgs 2>$null
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($token)) {
             $account = (az account show --query user.name -o tsv 2>$null)
-            Write-Host "Authenticated via Azure CLI as $account" -ForegroundColor DarkGray
+            $where = if ($TenantId) { " in tenant $TenantId" } else { "" }
+            Write-Host "Authenticated via Azure CLI as $account$where" -ForegroundColor DarkGray
             return $token.Trim()
+        }
+
+        if ($TenantId) {
+            throw @"
+Azure CLI could not mint a token for tenant $TenantId.
+
+$EnvironmentUrl belongs to that directory. The signed-in identity may not be a member of
+it, or may need to sign in there explicitly:
+
+    az login --tenant $TenantId
+
+Do not work around this by dropping the tenant: a token from another directory is still a
+valid token, so Dataverse answers 403 0x80072560 rather than 401, and the failure reads as
+revoked access instead of a wrong directory.
+"@
         }
     }
 
@@ -97,7 +171,10 @@ function Get-DataverseToken {
         Import-Module Az.Accounts -ErrorAction Stop
         $context = Get-AzContext
         if ($context) {
-            $result = Get-AzAccessToken -ResourceUrl $Resource
+            $result = if ($TenantId) {
+                Get-AzAccessToken -ResourceUrl $Resource -TenantId $TenantId
+            }
+            else { Get-AzAccessToken -ResourceUrl $Resource }
             # Az 12+ returns a SecureString; earlier versions a plain string.
             $value = if ($result.Token -is [System.Security.SecureString]) {
                 [System.Net.NetworkCredential]::new("", $result.Token).Password
@@ -111,7 +188,16 @@ function Get-DataverseToken {
     throw "No Dataverse credential. Run 'az login', or 'Connect-AzAccount', or pass -AccessToken."
 }
 
-$script:AccessToken = if ($AccessToken) { $AccessToken } else { Get-DataverseToken -Resource $script:Resource }
+if ($AccessToken) {
+    $script:AccessToken = $AccessToken
+}
+else {
+    $resolvedTenant = if ($Tenant) { $Tenant } else { Get-DataverseTenant -Resource $script:Resource }
+    if (-not $resolvedTenant) {
+        Write-Host "Could not determine the environment's tenant; using the active one." -ForegroundColor DarkYellow
+    }
+    $script:AccessToken = Get-DataverseToken -Resource $script:Resource -TenantId $resolvedTenant
+}
 Write-Host "Target environment: $EnvironmentUrl" -ForegroundColor DarkGray
 
 function Write-Created { param([string]$Message) Write-Host "  Created $Message" -ForegroundColor Green }
@@ -319,7 +405,41 @@ function Ensure-GlobalChoice {
         -Path "GlobalOptionSetDefinitions(Name='$Name')" -AllowNotFound
 
     if ($existing) {
-        Write-Exists "global choice '$Name'"
+        <#
+            Reconcile, do not just report.
+
+            This used to return here, which made the -Options list above authoritative
+            only for an environment that did not have the choice yet. Adding a value to
+            a declaration and re-running was a silent no-op — the script said "exists"
+            and the new option never appeared, which is exactly how `Withdrawn` came to
+            be declared on adoption status while no environment had it.
+
+            Options are only ADDED. Nothing here deletes or relabels one: a value that
+            rows already carry cannot be withdrawn safely by a provisioning script, and
+            an environment holding an extra option is not evidence the declaration is
+            wrong. Existing values are left exactly where they are, so the integers the
+            generated models and the MCP server's constants depend on never move.
+        #>
+        $labels = @($existing.Options | ForEach-Object { $_.Label.LocalizedLabels[0].Label })
+        $missing = @($Options | Where-Object { $labels -notcontains $_ })
+
+        if ($missing.Count -eq 0) {
+            Write-Exists "global choice '$Name' ($($labels.Count) options)"
+            return
+        }
+
+        foreach ($label in $missing) {
+            # InsertOptionValue with no Value lets Dataverse allocate the next integer in
+            # the publisher's range, which is what every existing option was given.
+            Invoke-Dataverse -Method POST -Path "InsertOptionValue" -InSolution -Body @{
+                OptionSetName = $Name
+                Label         = (New-Label $label)
+            } | Out-Null
+            Write-Created "option '$label' on global choice '$Name'"
+        }
+
+        Write-Host "  Re-run TypeGen and regenerate the code app's models: a new option" -ForegroundColor DarkYellow
+        Write-Host "  is invisible to the client until Cycai_*Model.ts carries it." -ForegroundColor DarkYellow
         return
     }
 
@@ -763,7 +883,11 @@ $choiceApprovalState = "$($Prefix)_approvalstate"
 $choiceActorType = "$($Prefix)_actortype"
 
 Ensure-GlobalChoice -Name $choiceHubItemType -DisplayName "Hub Item Type" -Options @("Idea", "Solution")
-Ensure-GlobalChoice -Name $choiceAdoptionStatus -DisplayName "Adoption Status" -Options @("Exploring", "Implementing", "Using")
+# Withdrawn is the tombstone: the row is retained and counted nowhere. Declared last so
+# Dataverse allocates it the next value in the range, matching participation status —
+# whose own Withdrawn is 100000003, which AdoptionRow.WithdrawnValue in the MCP server
+# hardcodes. Adding it anywhere but the end would move an existing option's integer.
+Ensure-GlobalChoice -Name $choiceAdoptionStatus -DisplayName "Adoption Status" -Options @("Exploring", "Implementing", "Using", "Withdrawn")
 Ensure-GlobalChoice -Name $choiceParticipationStatus -DisplayName "Participation Status" -Options @("Proposed", "Accepted", "Rejected", "Withdrawn")
 Ensure-GlobalChoice -Name $choiceLinkRelationship -DisplayName "Link Relationship" -Options @("Proposed", "Relevant", "Existing")
 Ensure-GlobalChoice -Name $choiceApprovalState -DisplayName "Approval State" -Options @("Pending", "Approved", "Rejected")
@@ -853,20 +977,59 @@ Ensure-MemoColumn     -Table $participation -Name "$($Prefix)_rationale"        
 Ensure-DateTimeColumn -Table $participation -Name "$($Prefix)_decidedon"           -DisplayName "Decided On"
 
 # ---------------------------------------------------------------------------
-# Idea <-> Solution links: deliberately NOT a table here
+# Idea <-> Solution links
 # ---------------------------------------------------------------------------
 
-# An earlier design kept links in Dataverse so a link could carry a relationship
-# taxonomy (Proposed / Relevant / Existing) and its own approval state, neither of
-# which fits on an Azure DevOps link.
+# This table was removed once, on the reasoning that restricting linking to reviewers
+# removed the pending state and with it the need to store anything: a link just means
+# "this solution answers this idea", which is a plain Azure DevOps `Related` link.
 #
-# Both of those only existed because anyone could propose a link. Restricting
-# linking to reviewers removes the pending state, and with it the taxonomy: a link
-# just means "this solution answers this idea". That is a plain ADO `Related` link,
-# which brings the work item link panel, traceability and WIQL queries for free.
+# That reasoning died when linking became open to anyone who can see both items. Three
+# things need approval — ideas, solutions, and the links between them — and an approval
+# needs somewhere to be pending.
 #
-# The cycai_linkrelationship and cycai_approvalstate global choices are left in
-# place; approval state is still used elsewhere and choices are cheap.
+# The division of labour, which is the point of the design:
+#
+#   Dataverse  holds the PROPOSAL and its decision. Pending, Approved or Rejected,
+#              with who proposed it, who decided, and why.
+#   ADO        holds APPROVED TRUTH ONLY. The `Related` link is created at the moment
+#              of approval and never before.
+#
+# So a pending link is invisible in Azure DevOps, deliberately and by decision. Do not
+# "fix" that by writing a provisional link, tag or comment — every reader of ADO
+# relations (the work item link panel, WIQL, traceability, the linked-items lists in
+# the app) is then correct for free, with no approval filter to remember.
+
+Write-Step "Ensuring the link table..."
+$link = "$($Prefix)_link"
+
+Ensure-Table -LogicalName $link -DisplayName "Link" -DisplayCollectionName "Links" `
+    -Description "A proposal that a solution answers an idea, and the decision on it." `
+    -PrimaryColumnDisplayName "Link Key"
+
+Ensure-StringColumn  -Table $link -Name "$($Prefix)_linkkey"       -DisplayName "Link Key" -MaxLength 100 -Required `
+    -Description "{ideaWorkItemId}:{solutionWorkItemId}. Half of the uniqueness key on its own."
+Ensure-IntegerColumn -Table $link -Name "$($Prefix)_ideaid"        -DisplayName "Idea Id" -Required `
+    -Description "Azure DevOps work item id of the idea."
+Ensure-IntegerColumn -Table $link -Name "$($Prefix)_solutionid"    -DisplayName "Solution Id" -Required `
+    -Description "Azure DevOps work item id of the solution claimed to answer it."
+Ensure-ChoiceColumn  -Table $link -Name "$($Prefix)_approvalstate" -DisplayName "Approval" -GlobalChoiceName $choiceApprovalState -Required
+Ensure-LookupColumn  -Table $link -Name "$($Prefix)_proposedbyid"  -DisplayName "Proposed By" -TargetTable "systemuser"
+Ensure-LookupColumn  -Table $link -Name "$($Prefix)_decidedbyid"   -DisplayName "Decided By" -TargetTable "systemuser"
+Ensure-MemoColumn    -Table $link -Name "$($Prefix)_rationale"     -DisplayName "Rationale" -MaxLength 4000 `
+    -Description "Why the link was approved or rejected. Required by the decision handler, as for every other decision."
+Ensure-DateTimeColumn -Table $link -Name "$($Prefix)_decidedon"    -DisplayName "Decided On"
+
+# One proposal per idea/solution pair, enforced by the platform rather than by a
+# read-then-write check two clicks can race past — the same reason the vote table has
+# one. Proposing an existing pair is then a conflict, which the provider treats as
+# success: "already proposed" is what the person wanted.
+Ensure-AlternateKey -Table $link -Name "$($Prefix)_link_unique" -DisplayName "Unique link per idea and solution" `
+    -Columns @("$($Prefix)_linkkey")
+
+# The cycai_linkrelationship global choice stays unused. The relationship taxonomy
+# (Proposed / Relevant / Existing) described what KIND of answer a solution was, which
+# nobody ever acted on; approval is about whether the claim is true at all.
 
 # ---------------------------------------------------------------------------
 # Activity
@@ -989,5 +1152,5 @@ Write-Host ""
     EnvironmentUrl = $EnvironmentUrl
     Prefix         = $Prefix
     SolutionName   = $SolutionName
-    Tables         = @($vote, $adoption, $participation, $activity, $momentum)
+    Tables         = @($vote, $adoption, $participation, $link, $activity, $momentum)
 }

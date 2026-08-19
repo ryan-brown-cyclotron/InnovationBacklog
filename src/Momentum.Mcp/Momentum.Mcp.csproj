@@ -7,6 +7,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      The batch wire format is an implementation detail of the Dataverse backend and
+      stays internal, but it is also the one piece of it that can be tested without a
+      tenant — so the test project is let in rather than the type being made public
+      for the sake of a test.
+    -->
+    <InternalsVisibleTo Include="Momentum.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Azure.Functions.Worker" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" />

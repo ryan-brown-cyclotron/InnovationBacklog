@@ -40,6 +40,25 @@ public class SolutionUseTests
     }
 
     [Fact]
+    public void SolutionUse_Withdrawn_IsNotActive_AndStampsNoCompletion()
+    {
+        // A withdrawal is the opposite claim to a rollout: the row is retained as a
+        // tombstone, and CompletedAt stays null because that timestamp is what callers read
+        // to mean "rolled out". Counting a withdrawn use as completed would turn "we
+        // stopped" into "we finished".
+        var withdrawn = new SolutionUse
+        {
+            SolutionId = "sol1",
+            StartedBy = new UserId("dev@org"),
+            ProjectName = "X",
+            Status = SolutionUseStatus.Withdrawn
+        };
+
+        Assert.False(withdrawn.IsActive);
+        Assert.Null(withdrawn.CompletedAt);
+    }
+
+    [Fact]
     public void SolutionUse_DefaultsProjectNameAndTeam()
     {
         var use = new SolutionUse { SolutionId = "s", StartedBy = new UserId("u") };

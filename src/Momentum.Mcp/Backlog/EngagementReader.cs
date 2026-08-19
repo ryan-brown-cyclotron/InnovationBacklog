@@ -13,7 +13,7 @@ namespace Momentum.Mcp.Backlog;
 /// Read from the rows that record the engagement — <c>cycai_vote</c>, <c>cycai_adoption</c>,
 /// <c>cycai_participation</c> — rather than from the <c>cycai_momentum</c> rollup table.
 /// <para>
-/// The rollup is the obvious read and would be one request instead of four, but nothing
+/// The rollup is the obvious read and would be one row instead of four queries, but nothing
 /// writes to it: there is no plugin, flow or worker behind either host, and the code app's
 /// adapter was changed away from it for exactly this reason after every count it produced
 /// came back zero (see <c>provider/dataverse/rollups.ts</c>). A cache nobody fills is worse
@@ -24,9 +24,9 @@ namespace Momentum.Mcp.Backlog;
 /// </para>
 /// <para>
 /// Bounded to a single item on purpose. This is what makes <c>get</c> the place the two
-/// stores meet: four small filtered reads for one item are affordable, and the same join
-/// across a fifty-row list is not — which is why <c>search</c> and <c>list</c> do not pay
-/// for it.
+/// stores meet: a few small filtered reads for one item are affordable — one request, since
+/// they travel as a <c>$batch</c> — and the same join across a fifty-row list is not, which
+/// is why <c>search</c> and <c>list</c> do not pay for it.
 /// </para>
 /// </remarks>
 public sealed class EngagementReader(
@@ -43,35 +43,53 @@ public sealed class EngagementReader(
         var targetKey = facet.TargetKey(itemId);
         var keyFilter = $"cycai_targetkey eq '{OData.Literal(targetKey)}'";
 
-        var votesCall = dataverse.GetJsonAsync<ODataPage<VoteRow>>(
-            $"cycai_votes?$select=createdon&{OData.Filter(keyFilter)}&$count=true",
-            caller,
-            cancellationToken);
-
-        var participationCall = dataverse.GetJsonAsync<ODataPage<ParticipationRow>>(
-            $"cycai_participations?$select=cycai_participationstatus&{OData.Filter(keyFilter)}&$count=true",
-            caller,
-            cancellationToken);
-
-        var rollupCall = dataverse.GetJsonAsync<ODataPage<MomentumRow>>(
-            $"cycai_momentums?$select=cycai_demandrank,cycai_momentumscore,cycai_calculatedon&{OData.Filter(keyFilter)}&$top=1",
-            caller,
-            cancellationToken);
-
         // Adoption is keyed by the numeric solution id rather than the target key, and only
         // a solution can be adopted — an idea has nothing to adopt yet.
-        var adoptionCall = facet == Facet.Solution && long.TryParse(itemId, CultureInfo.InvariantCulture, out var numericId)
-            ? dataverse.GetJsonAsync<ODataPage<AdoptionRow>>(
-                $"cycai_adoptions?$select=cycai_team,cycai_projectname,cycai_completedon" +
-                $"&{OData.Filter($"cycai_solutionid eq {numericId}")}&$count=true",
-                caller,
-                cancellationToken)
-            : null;
+        long? solutionId = facet == Facet.Solution &&
+            long.TryParse(itemId, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : null;
 
-        var votes = await votesCall;
-        var participation = await participationCall;
-        var rollup = await rollupCall;
-        var adoptions = adoptionCall is null ? null : await adoptionCall;
+        /*
+            One request, not four.
+
+            These were four parallel GETs, which is four calls against the Dataverse
+            budget for one `get`. Batching them is available here and is NOT available to
+            the code app — the generated Power Platform services build one $batch per
+            operation and expose no seam to share one — so it is worth taking where it can
+            be taken.
+
+            Parallel was never the point: the four already overlapped in time. The point
+            is the call count, and the per-read failure reporting below is unchanged
+            because each part carries its own status.
+        */
+        List<string> reads =
+        [
+            $"cycai_votes?$select=createdon&{OData.Filter(keyFilter)}&$count=true",
+            $"cycai_participations?$select=cycai_participationstatus&{OData.Filter(keyFilter)}&$count=true",
+            $"cycai_momentums?$select=cycai_demandrank,cycai_momentumscore,cycai_calculatedon&{OData.Filter(keyFilter)}&$top=1",
+        ];
+
+        if (solutionId is not null)
+        {
+            /*
+                `cycai_adoptionstatus` is in the projection so withdrawn rows can be
+                excluded, and `$count` is deliberately NOT requested for this read: the
+                server would count every row including the withdrawn ones, and the code
+                below cannot correct a number it did not compute. The other three reads
+                keep `$count=true` because nothing filters them after the fact.
+            */
+            reads.Add(
+                $"cycai_adoptions?$select=cycai_team,cycai_projectname,cycai_completedon,cycai_adoptionstatus" +
+                $"&{OData.Filter($"cycai_solutionid eq {solutionId}")}");
+        }
+
+        var parts = await dataverse.BatchGetAsync(reads, caller, cancellationToken);
+
+        var votes = parts[0].As<ODataPage<VoteRow>>();
+        var participation = parts[1].As<ODataPage<ParticipationRow>>();
+        var rollup = parts[2].As<ODataPage<MomentumRow>>();
+        var adoptions = solutionId is null ? null : parts[3].As<ODataPage<AdoptionRow>>();
 
         /*
             Votes decide the outcome. They are the one engagement signal both facets always
@@ -135,6 +153,10 @@ public sealed class EngagementReader(
     ///   <item>Active versus completed is decided by the COMPLETION TIMESTAMP, not by the
     ///   status choice. Completing an adoption happens to set status <c>Using</c> as well,
     ///   but the status is a workflow stage and the timestamp is the fact.</item>
+    ///   <item>Withdrawn rows are the one case the timestamp cannot decide, and they count
+    ///   in NOTHING — not the total, not the teams, not the active/completed split. A
+    ///   withdrawal says the adoption is not real, and a withdrawn row never stamps a
+    ///   completion timestamp, so counting it would file it as active for ever.</item>
     /// </list>
     /// </summary>
     private static AdoptionTally? Adoptions(BackendResult<ODataPage<AdoptionRow>>? result)
@@ -144,7 +166,10 @@ public sealed class EngagementReader(
             return null;
         }
 
-        var rows = result.Value!.Value ?? [];
+        // Filtered first, so every number below is computed over the same set. The server's
+        // @odata.count is not usable here — it counted the withdrawn rows too, which is why
+        // the read does not ask for it.
+        var rows = (result.Value!.Value ?? []).Where(row => !row.IsWithdrawn).ToList();
 
         var teams = rows
             .Select(row => (row.Team ?? row.ProjectName ?? string.Empty).Trim())
@@ -153,7 +178,7 @@ public sealed class EngagementReader(
             .Count();
 
         return new AdoptionTally(
-            Adoptions: result.Value.Count ?? rows.Count,
+            Adoptions: rows.Count,
             Teams: teams,
             ActiveUses: rows.Count(row => string.IsNullOrWhiteSpace(row.CompletedOn)),
             CompletedUses: rows.Count(row => !string.IsNullOrWhiteSpace(row.CompletedOn)));
@@ -233,7 +258,26 @@ internal sealed record ParticipationRow(
 internal sealed record AdoptionRow(
     [property: JsonPropertyName("cycai_team")] string? Team,
     [property: JsonPropertyName("cycai_projectname")] string? ProjectName,
-    [property: JsonPropertyName("cycai_completedon")] string? CompletedOn);
+    [property: JsonPropertyName("cycai_completedon")] string? CompletedOn,
+    [property: JsonPropertyName("cycai_adoptionstatus")] int? Status)
+{
+    public const int ExploringValue = 100000000;
+    public const int ImplementingValue = 100000001;
+    public const int UsingValue = 100000002;
+    public const int WithdrawnValue = 100000003;
+
+    /// <summary>
+    /// A withdrawn adoption is a tombstone: the row is retained for history and counted
+    /// nowhere.
+    /// </summary>
+    /// <remarks>
+    /// A null status is NOT treated as withdrawn. Dataverse omits a field entirely when it
+    /// is absent from the <c>$select</c>, so null means "not asked for" as often as it means
+    /// "not set" — and defaulting to withdrawn would silently erase every adoption the day
+    /// somebody trimmed the projection.
+    /// </remarks>
+    public bool IsWithdrawn => Status == WithdrawnValue;
+}
 
 internal sealed record MomentumRow(
     [property: JsonPropertyName("cycai_demandrank")] int? DemandRank,

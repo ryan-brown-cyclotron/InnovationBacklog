@@ -2,11 +2,26 @@ using Momentum.Library.Domain.Identity;
 
 namespace Momentum.Library.Domain.Engagement;
 
+/// <summary>
+/// Exploring and Implementing are active; Using is the settled end state; Withdrawn is the
+/// tombstone.
+/// </summary>
+/// <remarks>
+/// Withdrawn is a status rather than a delete because a real delete would silently change
+/// every historical rollup that counted the row. It mirrors
+/// <see cref="ContributionStatus"/>.Withdrawn, which is the same act on the same kind of
+/// record, and the code app's <c>AdoptionStatus</c> is kept in step with this enum.
+/// <para>
+/// A withdrawn use is NOT active, and is also not merely inactive: callers that count
+/// adoptions exclude it entirely rather than filing it with the completed ones.
+/// </para>
+/// </remarks>
 public enum SolutionUseStatus
 {
     Exploring,
     Implementing,
-    Using
+    Using,
+    Withdrawn
 }
 
 public sealed record SolutionUse
