@@ -79,7 +79,7 @@
             }
           },
           "403": {
-            "description": "The caller could not be authenticated to Azure DevOps, or has no write access to the repository.",
+            "description": "The caller could not be authenticated to the git host, or has no write access to the repository.",
             "schema": {
               "$ref": "#/definitions/ProblemDetails"
             }
@@ -92,9 +92,131 @@
           }
         }
       }
+    },
+    "/skills/provision": {
+      "post": {
+        "summary": "Provision the skills repository",
+        "description": "Creates the skills repository if it is missing and seeds the marketplace manifest, README and .gitattributes if they are missing. Idempotent — safe to call on every deployment. A 200 with a null commitId means the repository was already fine. CommitApprovedSkill fails until this has run once, because it reads the manifest and will not invent one.",
+        "operationId": "ProvisionSkillsRepository",
+        "x-ms-visibility": "advanced",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": false,
+            "schema": {
+              "$ref": "#/definitions/ProvisionSkillsRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository is ready. Check wasInitialised and commitId to tell 'already fine' from 'seeded now'.",
+            "schema": {
+              "$ref": "#/definitions/ProvisionSkillsResponse"
+            }
+          },
+          "400": {
+            "description": "The configured target is not usable — a repository name that is a GUID, an unknown branch, an unsafe segment name.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          },
+          "403": {
+            "description": "The credential could not be authenticated, or cannot create a repository in this project or organization.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          },
+          "409": {
+            "description": "Someone else pushed the first commit while this one was being prepared. Retry.",
+            "schema": {
+              "$ref": "#/definitions/ProblemDetails"
+            }
+          }
+        }
+      }
     }
   },
   "definitions": {
+    "ProvisionSkillsRequest": {
+      "type": "object",
+      "description": "Every field is optional. An empty body provisions exactly what the function app's configuration describes.",
+      "properties": {
+        "branch": {
+          "type": "string",
+          "title": "Branch",
+          "description": "Branch to seed. Defaults to the configured branch, normally main.",
+          "x-ms-summary": "Branch",
+          "x-ms-visibility": "advanced"
+        },
+        "segments": {
+          "type": "array",
+          "title": "Segments",
+          "description": "Plugin segments to scaffold. Convenience only — a segment is registered on first adoption anyway, so this just decides what is visible before any skill has been adopted. Ignored when the manifest already exists.",
+          "x-ms-summary": "Segments",
+          "x-ms-visibility": "advanced",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ProvisionSkillsResponse": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "title": "Target",
+          "description": "Host and repository as the app resolved them, e.g. 'GitHub cyclotron/skills'. Echoed back because a wrong target is the failure that looks like a permissions problem.",
+          "x-ms-summary": "Target"
+        },
+        "host": {
+          "type": "string",
+          "title": "Host",
+          "description": "AzureDevOps or GitHub.",
+          "x-ms-summary": "Host"
+        },
+        "auth": {
+          "type": "string",
+          "title": "Auth mode",
+          "description": "Caller or Pat. The mode only — the token is never returned.",
+          "x-ms-summary": "Auth mode"
+        },
+        "branch": {
+          "type": "string",
+          "title": "Branch",
+          "x-ms-summary": "Branch"
+        },
+        "repositoryCreated": {
+          "type": "boolean",
+          "title": "Repository created",
+          "description": "True when this call created the repository.",
+          "x-ms-summary": "Repository created"
+        },
+        "wasInitialised": {
+          "type": "boolean",
+          "title": "Was already initialised",
+          "description": "True when the manifest was already present, i.e. nothing that mattered changed.",
+          "x-ms-summary": "Was already initialised"
+        },
+        "commitId": {
+          "type": "string",
+          "title": "Commit id",
+          "description": "The seed commit, or null when there was nothing to seed.",
+          "x-ms-summary": "Commit id"
+        },
+        "seededPaths": {
+          "type": "array",
+          "title": "Seeded paths",
+          "description": "Files written by this call.",
+          "x-ms-summary": "Seeded paths",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "ValidateSkillRequest": {
       "type": "object",
       "required": [

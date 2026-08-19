@@ -306,13 +306,23 @@ else {
 }
 
 Write-Host "`n--- Function app settings ---" -ForegroundColor Cyan
-Write-Host "Momentum:Mcp:SkillsProject      = $Project"
-Write-Host "Momentum:Mcp:SkillsRepository   = $RepositoryName"
-Write-Host "Momentum:Mcp:SkillsDefaultBranch = $Branch"
+Write-Host "Momentum:Skills:Host                     = AzureDevOps"
+Write-Host "Momentum:Skills:AzureDevOps:Organization = $Organization"
+Write-Host "Momentum:Skills:AzureDevOps:Project      = $Project"
+Write-Host "Momentum:Skills:AzureDevOps:Repository   = $RepositoryName"
+Write-Host "Momentum:Skills:Branch                   = $Branch"
+Write-Host "(Organization and Project fall back to Momentum:Mcp:AdoOrganization / AdoProject.)"
+Write-Host "As Azure app settings, replace each colon with a double underscore."
 
-Write-Host "`n--- Note ---" -ForegroundColor Yellow
-Write-Host "Intake commits as the calling user, so each approver needs Contribute on this"
-Write-Host "repository. The PAT used here provisions it; it is not used at runtime."
+Write-Host "`n--- Notes ---" -ForegroundColor Yellow
+Write-Host "This script is superseded by POST skills/provision, which does the same thing with"
+Write-Host "the credential the function app already has, on Azure DevOps or GitHub. See"
+Write-Host "docs/reference/skill-intake-configuration.md."
+Write-Host ""
+Write-Host "Who intake commits as is a setting, not a property of this repository:"
+Write-Host "  Momentum:Skills:Auth = Caller  -> commits as the approver; each needs Contribute here."
+Write-Host "  Momentum:Skills:Auth = Pat     -> commits as the token owner; set Momentum:Skills:Pat."
+Write-Host "The PAT used by this script provisions the repository and is not implicitly reused."
 
 [PSCustomObject]@{
     RepositoryId  = $repository.id

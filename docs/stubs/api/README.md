@@ -8,7 +8,7 @@ the same identity, and they have almost nothing else in common.
 | Consumer | Agents (Copilot Studio) | The UI, on behalf of a person |
 | Shape | One operation, forever | One operation per endpoint |
 | Grows when tools are added | **No** | n/a |
-| Endpoint | `/runtime/webhooks/mcp` | `/api/skills/commit` |
+| Endpoint | `/runtime/webhooks/mcp` | `/api/skills/{validate,commit,provision}` |
 
 Both are **Swagger 2.0**. Power Platform custom connectors do not accept OpenAPI 3.x.
 

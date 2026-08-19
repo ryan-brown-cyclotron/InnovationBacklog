@@ -1,17 +1,40 @@
-node_modules/
-**/node_modules/
-dist/
-**/dist/
-.data
-.data/
-.data/**
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
+# Secrets ─────────────────────────────────────────────────────────────────────
+# local.settings.json carries Momentum:Skills:Pat. It is gitignored, so a clean checkout
+# does not have it — but a developer machine does, and `docker build .` sends the working
+# tree, not the commit. Without this line the PAT reaches a build layer.
+**/local.settings.json
 .env
-.env.local
-.env.*.local
-.env.auth0
-src/apps/docs/build/
-src/apps/docs/.docusaurus/
+.env.*
+*.pfx
+*.p12
+
+# Build output ─────────────────────────────────────────────────────────────────
+# Copying a host's bin/obj into the container poisons the build with artefacts restored
+# for a different RID, and the failure reads as a missing package.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.vs/
+**/.azurite/
+**/TestResults/
+
+# Not part of the server image ─────────────────────────────────────────────────
+# The Dockerfile copies only Momentum.Mcp and its reference chain, so these are already
+# outside it — listed to keep them out of the context that gets uploaded to the daemon.
+src/Momentum.Frontend/
+src/Momentum.AppHost/
+src/Momentum.Service/
+src/Momentum.ServiceDefaults/
+tests/
+docs/
+scripts/
+
+# Repository furniture ────────────────────────────────────────────────────────
+.git/
+.github/
+.vscode/
+.claude/
+*.md
+Dockerfile
+.dockerignore

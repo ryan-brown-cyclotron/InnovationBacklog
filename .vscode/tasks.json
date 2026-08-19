@@ -2,32 +2,34 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Start: MCP HTTP server (dev/no-auth)",
+			"label": "Start: Azurite",
+			"detail": "Storage emulator. The Functions host will not start without it.",
 			"type": "shell",
-			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-http-dev.ps1",
+			"command": "npx azurite --silent --location .azurite",
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
 			"isBackground": true,
 			"problemMatcher": [],
-			"group": "build",
 			"presentation": {
-				"reveal": "always",
-				"panel": "new",
-				"focus": true,
-				"label": "MCP HTTP (dev)"
+				"reveal": "silent",
+				"panel": "dedicated",
+				"focus": false,
+				"label": "Azurite"
 			},
 			"runOptions": {
 				"instanceLimit": 1
 			}
 		},
 		{
-			"label": "Start: MCP HTTP server (Auth0)",
+			"label": "Start: MCP + skill intake",
+			"detail": "Momentum.Mcp on :7071 — /runtime/webhooks/mcp and /api/skills/*. Matches .vscode/mcp.json.",
 			"type": "shell",
-			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-http-auth.ps1",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/start-mcp.ps1",
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
+			"dependsOn": "Start: Azurite",
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "build",
@@ -35,10 +37,49 @@
 				"reveal": "always",
 				"panel": "new",
 				"focus": true,
-				"label": "MCP HTTP (Auth0)"
+				"label": "MCP"
 			},
 			"runOptions": {
 				"instanceLimit": 1
+			}
+		},
+		{
+			"label": "Start: everything (Aspire)",
+			"detail": "Function app + code app dev server. Competes with the task above for :7071 — run one.",
+			"type": "shell",
+			"command": "dotnet run --project src/Momentum.AppHost",
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"DOTNET_ROLL_FORWARD": "Major"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"focus": true,
+				"label": "Aspire"
+			},
+			"runOptions": {
+				"instanceLimit": 1
+			}
+		},
+		{
+			"label": "Test",
+			"type": "shell",
+			"command": "dotnet test tests/Momentum.Tests/Momentum.Tests.csproj",
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"DOTNET_ROLL_FORWARD": "Major"
+				}
+			},
+			"problemMatcher": "$msCompile",
+			"group": {
+				"kind": "test",
+				"isDefault": true
 			}
 		}
 	]

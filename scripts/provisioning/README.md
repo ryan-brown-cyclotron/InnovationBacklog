@@ -126,6 +126,15 @@ Pass `-SkipQueries` if the caller cannot write to Shared Queries.
 The git repository skill intake commits into. Independent of the three backing-store
 scripts.
 
+> **Superseded by `POST skills/provision`.** The function app does this itself now, with the
+> credential it already has, on either Azure DevOps or GitHub — see
+> [skill-intake-configuration.md](../../docs/reference/skill-intake-configuration.md). This
+> script still works and still does the same thing; it needs a PAT in a shell and someone
+> remembering to run it, which is what made bootstrap a prerequisite people forgot. It also
+> seeds the manifest through `ConvertTo-Json`, whose whitespace differs from the endpoint's,
+> so the first commit after it reformats the file once. Prefer the endpoint. Keep the script
+> for a target the function app has no credential for.
+
 ```powershell
 ./Provision-SkillsRepository.ps1 -Organization contoso -Project "Innovation Backlog" `
     -Segments engineering,operations
@@ -155,8 +164,11 @@ SKILL.md frontmatter, not by the directory, so the folder is free to carry the i
 different folder, so intake deletes the solution's previous folder in the same commit.
 Without that the marketplace would publish one solution twice under two names.
 
-The PAT provisions the repository and is not used at runtime — intake commits as the
-calling user, so each approver needs **Contribute** on it.
+The PAT here provisions the repository. Whether one is also used at runtime is a function app
+setting: under `Momentum:Skills:Auth=Caller` intake commits as the calling user and each
+approver needs **Contribute** on the repository in their own right; under `Auth=Pat` every
+commit is attributed to the token's owner and `Approved-by` in the commit message is the
+audit trail.
 
 ### `Provision-McpAppRegistration.ps1`
 
