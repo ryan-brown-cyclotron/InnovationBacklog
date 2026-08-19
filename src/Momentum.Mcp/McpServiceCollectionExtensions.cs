@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Momentum.Library.Application.Skills;
 using Momentum.Library.Infrastructure.AzureDevOps;
+using Momentum.Library.Infrastructure.GitHub;
 using Momentum.Mcp.Auth;
 using Momentum.Mcp.Backends;
 using Momentum.Mcp.Backlog;
@@ -72,7 +73,7 @@ public static class McpServiceCollectionExtensions
             CreateClient(provider, AzureDevOpsClientName, DownstreamResource.AzureDevOps));
 
         AddBacklogTools(services);
-        AddSkillIntake(services);
+        AddSkillIntake(services, configuration);
 
         return services;
     }
@@ -94,53 +95,178 @@ public static class McpServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Skill intake: the git adapter, its HTTP client, and the service that drives them.
+    /// Skill intake: the git adapter for whichever host is configured, its HTTP client, and the
+    /// two services that drive it.
     /// </summary>
     /// <remarks>
-    /// A separate named client from the MCP tools' Azure DevOps client. Same organization
-    /// and same token, but the adapter takes a plain <see cref="HttpClient"/> and gets its
-    /// authorization from a handler, because it is called from HTTP triggers where the
-    /// caller is scoped rather than threaded.
+    /// A separate named client from the MCP tools' Azure DevOps client even when both point at the
+    /// same organization. The adapters take a plain <see cref="HttpClient"/> and get their
+    /// authorization from a handler, because they are called from HTTP triggers where the caller
+    /// is scoped rather than threaded — and because swapping that handler is the whole of the
+    /// difference between committing as the caller and committing as a service credential.
+    /// <para>
+    /// Host and auth are read off configuration here rather than resolved per request: they decide
+    /// which adapter and which handler get registered, so they have to be known before the
+    /// container is built. Changing either is a restart.
+    /// </para>
     /// </remarks>
-    private static void AddSkillIntake(IServiceCollection services)
+    private static void AddSkillIntake(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddOptions<SkillsOptions>()
+            .Bind(configuration.GetSection(SkillsOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddSingleton<IValidateOptions<SkillsOptions>, SkillsOptionsValidator>();
+
         services.AddScoped<CallerContextAccessor>();
 
-        services.AddTransient(provider => new CallerTokenHandler(
-            provider.GetRequiredService<IDownstreamTokenProvider>(),
-            provider.GetRequiredService<CallerContextAccessor>(),
-            DownstreamResource.AzureDevOps));
+        var skills = configuration.GetSection(SkillsOptions.SectionName).Get<SkillsOptions>()
+            ?? new SkillsOptions();
 
-        services.AddHttpClient(SkillsClientName)
+        if (skills.Host == SkillsGitHost.GitHub)
+        {
+            AddGitHubSkillRepository(services, skills);
+        }
+        else
+        {
+            AddAzureDevOpsSkillRepository(services, skills);
+        }
+
+        services.AddScoped<SkillIntakeService>();
+        services.AddScoped<SkillProvisioningService>();
+    }
+
+    private static void AddAzureDevOpsSkillRepository(IServiceCollection services, SkillsOptions skills)
+    {
+        if (skills.Auth == SkillsGitAuth.Pat)
+        {
+            /*
+                Captured from the configuration snapshot rather than resolved from IOptions,
+                because the handler is chosen at registration time and a handler that read the
+                token per request would still not be able to change which handler is registered.
+            */
+            var pat = skills.Pat ?? string.Empty;
+            services.AddTransient(_ => PersonalAccessTokenHandler.ForAzureDevOps(pat));
+        }
+        else
+        {
+            services.AddTransient(provider => new CallerTokenHandler(
+                provider.GetRequiredService<IDownstreamTokenProvider>(),
+                provider.GetRequiredService<CallerContextAccessor>(),
+                DownstreamResource.AzureDevOps));
+        }
+
+        var builder = services.AddHttpClient(SkillsClientName)
             .ConfigureHttpClient((provider, client) =>
             {
                 var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
-                client.BaseAddress = options.AdoApiRoot;
+                var current = provider.GetRequiredService<IOptions<SkillsOptions>>().Value;
+
+                client.BaseAddress = new Uri(
+                    $"https://dev.azure.com/{Organization(current, options)}/");
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             })
-            .AddHttpMessageHandler<CallerTokenHandler>()
             // Same reason as the tools' client: an API caller must never chase a sign-in page.
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
-        services.AddScoped<ISkillRepository>(provider =>
+        if (skills.Auth == SkillsGitAuth.Pat)
         {
-            var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+            builder.AddHttpMessageHandler<PersonalAccessTokenHandler>();
+        }
+        else
+        {
+            builder.AddHttpMessageHandler<CallerTokenHandler>();
+        }
+
+        services.AddScoped(provider =>
+        {
+            var mcp = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+            var current = provider.GetRequiredService<IOptions<SkillsOptions>>().Value;
 
             return new AdoGitSkillRepository(
                 provider.GetRequiredService<IHttpClientFactory>().CreateClient(SkillsClientName),
                 new AdoGitRepositoryOptions
                 {
-                    Project = string.IsNullOrWhiteSpace(options.SkillsProject)
-                        ? options.AdoProject
-                        : options.SkillsProject,
-                    RepositoryId = options.SkillsRepository,
-                    DefaultBranch = options.SkillsDefaultBranch,
+                    Organization = Organization(current, mcp),
+                    Project = string.IsNullOrWhiteSpace(current.AzureDevOps.Project)
+                        ? mcp.AdoProject
+                        : current.AzureDevOps.Project,
+                    RepositoryId = current.AzureDevOps.Repository,
+                    DefaultBranch = current.Branch,
                 },
                 provider.GetRequiredService<ILogger<AdoGitSkillRepository>>());
         });
 
-        services.AddScoped<SkillIntakeService>();
+        services.AddScoped<ISkillRepository>(provider =>
+            provider.GetRequiredService<AdoGitSkillRepository>());
+        services.AddScoped<ISkillRepositoryProvisioner>(provider =>
+            provider.GetRequiredService<AdoGitSkillRepository>());
     }
+
+    private static void AddGitHubSkillRepository(IServiceCollection services, SkillsOptions skills)
+    {
+        // Validated at startup: GitHub has no Caller mode, because there is no on-behalf-of
+        // exchange that produces a credential GitHub accepts.
+        var pat = skills.Pat ?? string.Empty;
+
+        services.AddTransient(_ => PersonalAccessTokenHandler.ForGitHub(pat));
+
+        services.AddHttpClient(SkillsClientName)
+            .ConfigureHttpClient((provider, client) =>
+            {
+                var current = provider.GetRequiredService<IOptions<SkillsOptions>>().Value;
+
+                client.BaseAddress = new Uri(current.GitHub.ApiRoot);
+
+                client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+
+                /*
+                    Both of these are load-bearing. GitHub rejects a request with no User-Agent
+                    outright — a 403 with "Request forbidden by administrative rules", which reads
+                    like a permissions problem and is not one. The API version header pins the
+                    response shape; without it a future default could change what this adapter
+                    parses.
+                */
+                client.DefaultRequestHeaders.Add("User-Agent", "Momentum-SkillIntake");
+                client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+            })
+            .AddHttpMessageHandler<PersonalAccessTokenHandler>()
+            // A GitHub redirect on an API call means the request landed on the web app, most
+            // often a GHES ApiRoot missing its /api/v3 path. Failing is more useful than a 200
+            // carrying HTML.
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+
+        services.AddScoped(provider =>
+        {
+            var current = provider.GetRequiredService<IOptions<SkillsOptions>>().Value;
+
+            return new GitHubSkillRepository(
+                provider.GetRequiredService<IHttpClientFactory>().CreateClient(SkillsClientName),
+                new GitHubRepositoryOptions
+                {
+                    Owner = current.GitHub.Owner,
+                    Repository = current.GitHub.Repository,
+                    DefaultBranch = current.Branch,
+                    CreatePrivate = current.GitHub.CreatePrivate,
+                },
+                provider.GetRequiredService<ILogger<GitHubSkillRepository>>());
+        });
+
+        services.AddScoped<ISkillRepository>(provider =>
+            provider.GetRequiredService<GitHubSkillRepository>());
+        services.AddScoped<ISkillRepositoryProvisioner>(provider =>
+            provider.GetRequiredService<GitHubSkillRepository>());
+    }
+
+    /// <summary>
+    /// The skills organization, falling back to the backlog's. The skills repository usually does
+    /// sit beside the backlog, and making people repeat the organization to say so is a setting
+    /// that only ever gets out of step.
+    /// </summary>
+    private static string Organization(SkillsOptions skills, McpOptions mcp) =>
+        string.IsNullOrWhiteSpace(skills.AzureDevOps.Organization)
+            ? mcp.AdoOrganization
+            : skills.AzureDevOps.Organization;
 
     private static void AddTokenProvider(
         IServiceCollection services,

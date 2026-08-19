@@ -58,18 +58,13 @@ public sealed class McpOptions
     /// <summary>Entra tenant id hosting the registration above.</summary>
     public string? TenantId { get; set; }
 
-    /// <summary>
-    /// Azure DevOps project holding the skills git repository. Defaults to
-    /// <see cref="AdoProject"/> — the skills repo often lives beside the backlog, but does
-    /// not have to.
-    /// </summary>
-    public string? SkillsProject { get; set; }
-
-    /// <summary>Name or GUID of the skills git repository.</summary>
-    public string SkillsRepository { get; set; } = "skills";
-
-    /// <summary>Branch skill intake commits to when a request does not name one.</summary>
-    public string SkillsDefaultBranch { get; set; } = "main";
+    /*
+        The skills repository used to be configured here as SkillsProject / SkillsRepository /
+        SkillsDefaultBranch, on the assumption that it sat beside the backlog in this same Azure
+        DevOps organization and was reached with this same token. It can be on GitHub, and it can
+        be reached with a PAT while these backlog tools still run on-behalf-of the caller — so it
+        moved to its own section, SkillsOptions ("Momentum:Skills").
+    */
 
     /// <summary>
     /// Dataverse Web API root, derived rather than configured so a trailing slash in

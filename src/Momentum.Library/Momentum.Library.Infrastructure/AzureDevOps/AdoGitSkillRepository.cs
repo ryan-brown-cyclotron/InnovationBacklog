@@ -5,29 +5,45 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Momentum.Library.Application.Skills;
 using Momentum.Library.Domain.Skills;
+using Momentum.Library.Infrastructure.Git;
 
 namespace Momentum.Library.Infrastructure.AzureDevOps;
 
 /// <summary>
-/// <see cref="ISkillRepository"/> over the Azure DevOps Git REST API.
+/// <see cref="ISkillRepository"/> and <see cref="ISkillRepositoryProvisioner"/> over the Azure
+/// DevOps Git REST API.
 /// </summary>
 /// <remarks>
-/// Raw REST rather than the client libraries: the surface is four calls, and the SDK is
+/// Raw REST rather than the client libraries: the surface is a handful of calls, and the SDK is
 /// historically awkward in an isolated Functions worker.
 /// <para>
 /// The <see cref="HttpClient"/> arrives already authenticated and already pointed at the
-/// organization. This type never sees a token, which is what lets the same adapter serve
-/// a user-delegated call and a service-identity call without knowing the difference.
+/// organization. This type never sees a token or a PAT, which is what lets the same adapter
+/// serve a user-delegated call, a service-identity call and a PAT call without knowing the
+/// difference.
+/// </para>
+/// <para>
+/// Both ports live on one type because the ADO REST dialect is what is being encapsulated, and
+/// splitting it would put the same URL shapes and the same error handling in two files. The
+/// ports stay separate so nothing on the intake path can reach a repository create.
 /// </para>
 /// </remarks>
 public sealed class AdoGitSkillRepository(
     HttpClient http,
     AdoGitRepositoryOptions options,
-    ILogger<AdoGitSkillRepository> logger) : ISkillRepository
+    ILogger<AdoGitSkillRepository> logger) : ISkillRepository, ISkillRepositoryProvisioner
 {
     private const string ApiVersion = "7.1";
 
+    /// <summary>
+    /// Azure DevOps takes all-zeroes as "this ref does not exist yet; create it" on a push.
+    /// The only way to make a first commit into an empty repository.
+    /// </summary>
+    private const string EmptyObjectId = "0000000000000000000000000000000000000000";
+
     private string Root => $"{Uri.EscapeDataString(options.Project)}/_apis/git/repositories/{Uri.EscapeDataString(options.RepositoryId)}";
+
+    private string ProjectRoot => $"{Uri.EscapeDataString(options.Project)}/_apis/git/repositories";
 
     public async Task<IReadOnlyCollection<string>> ListPathsAsync(
         string branch, string scopePath, CancellationToken cancellationToken = default)
@@ -100,7 +116,9 @@ public sealed class AdoGitSkillRepository(
 
     public async Task<string> CommitAsync(SkillCommit commit, CancellationToken cancellationToken = default)
     {
-        var oldObjectId = await GetBranchTipAsync(commit.Branch, cancellationToken);
+        var oldObjectId = await GetBranchTipAsync(commit.Branch, cancellationToken)
+            ?? throw new SkillIntakeException(
+                $"Branch '{commit.Branch}' does not exist in repository '{options.RepositoryId}'.");
 
         var changes = commit.Changes.Select(object (change) =>
         {
@@ -131,10 +149,95 @@ public sealed class AdoGitSkillRepository(
             };
         });
 
+        return await PushAsync(commit.Branch, oldObjectId, changes, commit.Message, cancellationToken);
+    }
+
+    // ---------------------------------------------------------------------------
+    // ISkillRepositoryProvisioner
+    // ---------------------------------------------------------------------------
+
+    public string Describe() =>
+        $"Azure DevOps {options.Organization}/{options.Project}/{options.RepositoryId}";
+
+    public async Task<SkillRepositoryState> InspectAsync(
+        string branch, CancellationToken cancellationToken = default)
+    {
+        using var response = await http.GetAsync($"{Root}?api-version={ApiVersion}", cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return new SkillRepositoryState(RepositoryExists: false, BranchExists: false);
+        }
+
+        await ReadSuccessBodyAsync(response, $"reading repository '{options.RepositoryId}'", cancellationToken);
+
+        return new SkillRepositoryState(
+            RepositoryExists: true,
+            BranchExists: await GetBranchTipAsync(branch, cancellationToken) is not null);
+    }
+
+    public async Task CreateRepositoryAsync(CancellationToken cancellationToken = default)
+    {
+        /*
+            The configured RepositoryId doubles as a name everywhere else, because the git
+            endpoints accept either. Create is the one call that cannot: a GUID names a
+            repository that by definition does not exist yet.
+        */
+        if (Guid.TryParse(options.RepositoryId, out _))
+        {
+            throw new SkillIntakeException(
+                $"Repository '{options.RepositoryId}' does not exist and cannot be created from a GUID. " +
+                "Configure Momentum:Skills:AzureDevOps:Repository as a name, or create the repository first.");
+        }
+
+        using var content = new StringContent(
+            JsonSerializer.Serialize(new { name = options.RepositoryId }),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await http.PostAsync(
+            $"{ProjectRoot}?api-version={ApiVersion}", content, cancellationToken);
+
+        await ReadSuccessBodyAsync(
+            response, $"creating repository '{options.RepositoryId}'", cancellationToken);
+
+        logger.LogInformation(
+            "Created repository {Repository} in {Project}.", options.RepositoryId, options.Project);
+    }
+
+    public async Task<string> SeedAsync(
+        string branch,
+        IReadOnlyDictionary<string, string> files,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        // Null, not a throw: a repository with no branch is the whole reason to seed, and
+        // all-zeroes is how Azure DevOps is told to create the ref on this push.
+        var oldObjectId = await GetBranchTipAsync(branch, cancellationToken) ?? EmptyObjectId;
+
+        var changes = files.Select(object (file) => new
+        {
+            changeType = "add",
+            item = new { path = "/" + file.Key.TrimStart('/') },
+            newContent = new { content = file.Value, contentType = "rawtext" },
+        });
+
+        return await PushAsync(branch, oldObjectId, changes, message, cancellationToken);
+    }
+
+    // ---------------------------------------------------------------------------
+
+    private async Task<string> PushAsync(
+        string branch,
+        string oldObjectId,
+        IEnumerable<object> changes,
+        string message,
+        CancellationToken cancellationToken)
+    {
         var payload = new
         {
-            refUpdates = new[] { new { name = $"refs/heads/{commit.Branch}", oldObjectId } },
-            commits = new[] { new { comment = commit.Message, changes } },
+            refUpdates = new[] { new { name = $"refs/heads/{branch}", oldObjectId } },
+            commits = new[] { new { comment = message, changes } },
         };
 
         using var content = new StringContent(
@@ -146,8 +249,8 @@ public sealed class AdoGitSkillRepository(
         if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.PreconditionFailed)
         {
             throw new SkillRepositoryConflictException(
-                $"Branch '{commit.Branch}' moved while this commit was being prepared: " +
-                await ReadErrorMessageAsync(response, cancellationToken));
+                $"Branch '{branch}' moved while this commit was being prepared: " +
+                await GitRest.ReadErrorMessageAsync(response, cancellationToken));
         }
 
         var body = await ReadSuccessBodyAsync(response, "pushing the commit", cancellationToken);
@@ -158,21 +261,24 @@ public sealed class AdoGitSkillRepository(
             "The push succeeded but Azure DevOps returned no commit id.");
     }
 
-    private async Task<string> GetBranchTipAsync(string branch, CancellationToken cancellationToken)
+    /// <summary>
+    /// The branch tip, or null when the branch does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than a throw, because the two callers disagree about what a missing branch
+    /// means: intake cannot proceed without one, provisioning is there precisely to create it.
+    /// Indexing <c>[0]</c> blind would give an IndexOutOfRange that says nothing.
+    /// </remarks>
+    private async Task<string?> GetBranchTipAsync(string branch, CancellationToken cancellationToken)
     {
         var url = $"{Root}/refs?filter={Uri.EscapeDataString($"heads/{branch}")}&api-version={ApiVersion}";
 
         using var response = await http.GetAsync(url, cancellationToken);
         var body = await ReadSuccessBodyAsync(response, $"resolving branch '{branch}'", cancellationToken);
 
-        // Indexing [0] blind gives an IndexOutOfRange that says nothing; a missing branch
-        // is a routine typo and deserves to say so.
-        var objectId = (JsonNode.Parse(body)?["value"] as JsonArray)?
+        return (JsonNode.Parse(body)?["value"] as JsonArray)?
             .OfType<JsonObject>()
             .FirstOrDefault()?["objectId"]?.GetValue<string>();
-
-        return objectId ?? throw new SkillIntakeException(
-            $"Branch '{branch}' does not exist in repository '{options.RepositoryId}'.");
     }
 
     /// <summary>
@@ -198,55 +304,36 @@ public sealed class AdoGitSkillRepository(
             organization at all. "Found" as a diagnostic sends people looking in entirely
             the wrong place.
         */
-        if (response.StatusCode is HttpStatusCode.Found
-            or HttpStatusCode.Redirect
-            or HttpStatusCode.MovedPermanently
-            or HttpStatusCode.TemporaryRedirect)
+        if (GitRest.IsRedirect(response.StatusCode))
         {
             throw new SkillIntakeException(
                 $"Azure DevOps redirected {what} to a sign-in page, meaning the request was " +
                 "not authenticated for this organization. Check the organization name and " +
-                "that the calling user is a member of it.");
+                "that the credential (PAT scope 'Code: read, write & manage', or the calling " +
+                "user) is valid for it.");
         }
 
-        var detail = await ReadErrorMessageAsync(response, cancellationToken);
+        var detail = await GitRest.ReadErrorMessageAsync(response, cancellationToken);
         throw new SkillIntakeException($"Azure DevOps refused {what} ({(int)response.StatusCode}): {detail}");
-    }
-
-    private static async Task<string> ReadErrorMessageAsync(
-        HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        const int MaxDetail = 500;
-
-        try
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                return response.ReasonPhrase ?? "no detail";
-            }
-
-            var message = JsonNode.Parse(body)?["message"]?.GetValue<string>();
-            if (!string.IsNullOrWhiteSpace(message))
-            {
-                return message;
-            }
-
-            return body.Length > MaxDetail ? body[..MaxDetail] + "…" : body;
-        }
-        catch (Exception ex) when (ex is JsonException or HttpRequestException or InvalidOperationException)
-        {
-            return response.ReasonPhrase ?? "no detail";
-        }
     }
 }
 
 /// <summary>Which repository intake writes to.</summary>
 public sealed class AdoGitRepositoryOptions
 {
+    /// <summary>
+    /// Organization name. Diagnostics only — the authenticated <see cref="HttpClient"/>'s base
+    /// address is what actually decides which organization is reached. Carried so a wrong
+    /// target can be named in an error rather than left to be inferred from a 404.
+    /// </summary>
+    public string Organization { get; set; } = string.Empty;
+
     public string Project { get; set; } = string.Empty;
 
-    /// <summary>Repository name or GUID.</summary>
+    /// <summary>
+    /// Repository name or GUID. A name for anything that might need provisioning — a GUID
+    /// cannot be created.
+    /// </summary>
     public string RepositoryId { get; set; } = string.Empty;
 
     /// <summary>Branch used when a request does not name one.</summary>

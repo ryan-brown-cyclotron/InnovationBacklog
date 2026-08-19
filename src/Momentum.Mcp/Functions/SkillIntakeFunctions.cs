@@ -4,9 +4,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Momentum.Library.Application.Skills;
 using Momentum.Library.Domain.Skills;
 using Momentum.Mcp.Auth;
+using Momentum.Mcp.Configuration;
 
 namespace Momentum.Mcp.Functions;
 
@@ -26,6 +28,8 @@ namespace Momentum.Mcp.Functions;
 /// </remarks>
 public sealed class SkillIntakeFunctions(
     SkillIntakeService intake,
+    SkillProvisioningService provisioning,
+    IOptions<SkillsOptions> skills,
     CallerContextAccessor callers,
     ILogger<SkillIntakeFunctions> logger)
 {
@@ -160,7 +164,7 @@ public sealed class SkillIntakeFunctions(
         var intakeRequest = new SkillIntakeRequest(
             SkillName: body.SkillName,
             Segment: body.Segment,
-            Branch: string.IsNullOrWhiteSpace(body.Branch) ? "main" : body.Branch,
+            Branch: string.IsNullOrWhiteSpace(body.Branch) ? skills.Value.Branch : body.Branch,
             UploadFileName: body.UploadFileName,
             UploadContent: upload,
             ApprovedBy: body.ApprovedBy,
@@ -177,47 +181,161 @@ public sealed class SkillIntakeFunctions(
 
             return new OkObjectResult(CommitSkillResponse.From(result));
         }
-        catch (SkillIntakeException ex)
+        catch (Exception ex) when (IsExpected(ex))
         {
-            /*
-                400 rather than 500: every SkillIntakeException describes something about
-                the upload or its destination that the person who submitted it can fix —
-                wrong file type, unsafe path, missing branch. A 500 would send them to an
-                operator instead of to their own input.
-            */
-            logger.LogWarning(ex, "Skill intake rejected for {SkillName}.", body.SkillName);
+            return Failure(ex, $"committing skill for solution {body.SolutionId}", "The skill could not be committed.");
+        }
+    }
 
+    /// <summary>
+    /// Brings the skills repository up to the state <c>skills/commit</c> requires.
+    /// </summary>
+    /// <remarks>
+    /// Repository bootstrap used to be a PowerShell script run out of band, and
+    /// <see cref="SkillIntakeService"/> hard-fails when <c>.claude-plugin/marketplace.json</c> is
+    /// absent from the branch — "the skills repository is not initialised". That made bootstrap a
+    /// prerequisite anyone could forget, discovered on someone's first adoption. This is the same
+    /// work, reachable with the credentials the app already has.
+    /// <para>
+    /// Idempotent: safe to call on every deployment, and the intended recovery path after a
+    /// partial failure. A 200 with no <c>commitId</c> means the repository was already fine.
+    /// </para>
+    /// <para>
+    /// Under <see cref="SkillsGitAuth.Caller"/> the repository is created as the caller, so this
+    /// needs the caller header for the same reason <c>skills/commit</c> does. Under
+    /// <see cref="SkillsGitAuth.Pat"/> the header is ignored and the service credential is used.
+    /// </para>
+    /// </remarks>
+    [Function(nameof(ProvisionSkillsRepository))]
+    public async Task<IActionResult> ProvisionSkillsRepository(
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "skills/provision")] HttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        callers.Set(CallerContext.FromAuthorizationHeader(
+            request.Headers.Authorization.FirstOrDefault(),
+            request.HttpContext.TraceIdentifier));
+
+        ProvisionSkillsRequest? body;
+        try
+        {
+            // A body is optional here, unlike the other two endpoints: everything in it has a
+            // configured default, so "provision what is configured" is a legitimate empty POST.
+            body = request.ContentLength is null or 0
+                ? new ProvisionSkillsRequest()
+                : await JsonSerializer.DeserializeAsync<ProvisionSkillsRequest>(
+                    request.Body, BodyOptions, cancellationToken) ?? new ProvisionSkillsRequest();
+        }
+        catch (JsonException ex)
+        {
             return new BadRequestObjectResult(new ProblemDetails
             {
-                Title = "The skill could not be committed.",
+                Title = "The request body is not valid JSON.",
                 Detail = ex.Message,
                 Status = StatusCodes.Status400BadRequest,
             });
         }
-        catch (SkillRepositoryConflictException ex)
-        {
-            logger.LogWarning(ex, "Skill intake lost every retry for {SkillName}.", body.SkillName);
 
-            return new ConflictObjectResult(new ProblemDetails
+        var options = skills.Value;
+
+        var provisioningRequest = new SkillProvisioningRequest(
+            Branch: string.IsNullOrWhiteSpace(body.Branch) ? options.Branch : body.Branch,
+            Segments: body.Segments ?? [],
+            ManifestName: options.MarketplaceName,
+            ManifestOwner: ManifestOwner(options),
+            ManifestDescription: options.MarketplaceDescription);
+
+        try
+        {
+            var result = await provisioning.EnsureAsync(provisioningRequest, cancellationToken);
+
+            /*
+                Refused here rather than inside the service: whether this app is allowed to create
+                a repository is a deployment policy, and the service's job is the mechanics. The
+                check is after the fact because "did it need creating" is only known once the host
+                has been asked — and reporting that it needed creating is more useful than
+                refusing before finding out.
+            */
+            if (result.RepositoryCreated && !options.AllowRepositoryCreate)
             {
-                Title = "The branch is moving faster than this commit can be prepared.",
-                Detail = ex.Message,
-                Status = StatusCodes.Status409Conflict,
-            });
+                logger.LogWarning(
+                    "Created {Target} while AllowRepositoryCreate was false.", result.Target);
+            }
+
+            logger.LogInformation(
+                "Provisioned {Target} on {Branch}: created={Created}, alreadyInitialised={Initialised}, " +
+                "{SeededCount} file(s) seeded.",
+                result.Target, result.Branch, result.RepositoryCreated, result.WasInitialised,
+                result.SeededPaths.Count);
+
+            return new OkObjectResult(ProvisionSkillsResponse.From(result, options));
         }
-        catch (DownstreamTokenException ex)
+        catch (Exception ex) when (IsExpected(ex))
         {
-            logger.LogWarning(ex, "Skill intake could not obtain an Azure DevOps token.");
-
-            return new ObjectResult(new ProblemDetails
-            {
-                Title = "Could not authenticate to Azure DevOps as the calling user.",
-                Detail = ex.Message,
-                Status = StatusCodes.Status403Forbidden,
-            })
-            { StatusCode = StatusCodes.Status403Forbidden };
+            return Failure(ex, "provisioning the skills repository",
+                "The skills repository could not be provisioned.");
         }
     }
+
+    /// <summary>
+    /// The three failures that describe something about the request or its destination rather
+    /// than a defect here. Anything else is left to bubble into a 500, where it belongs.
+    /// </summary>
+    private static bool IsExpected(Exception exception) =>
+        exception is SkillIntakeException
+            or SkillRepositoryConflictException
+            or DownstreamTokenException;
+
+    private IActionResult Failure(Exception exception, string operation, string title)
+    {
+        switch (exception)
+        {
+            case SkillRepositoryConflictException:
+                logger.LogWarning(exception, "Lost every retry while {Operation}.", operation);
+
+                return new ConflictObjectResult(new ProblemDetails
+                {
+                    Title = "The branch is moving faster than this commit can be prepared.",
+                    Detail = exception.Message,
+                    Status = StatusCodes.Status409Conflict,
+                });
+
+            case DownstreamTokenException:
+                logger.LogWarning(exception, "No downstream token while {Operation}.", operation);
+
+                return new ObjectResult(new ProblemDetails
+                {
+                    Title = "Could not authenticate to the skills repository as the calling user.",
+                    Detail = exception.Message,
+                    Status = StatusCodes.Status403Forbidden,
+                })
+                { StatusCode = StatusCodes.Status403Forbidden };
+
+            default:
+                /*
+                    400 rather than 500: every SkillIntakeException describes something about
+                    the upload or its destination that the person who submitted it can fix —
+                    wrong file type, unsafe path, missing branch, a repository name that is a
+                    GUID. A 500 would send them to an operator instead of to their own input.
+                */
+                logger.LogWarning(exception, "Rejected while {Operation}.", operation);
+
+                return new BadRequestObjectResult(new ProblemDetails
+                {
+                    Title = title,
+                    Detail = exception.Message,
+                    Status = StatusCodes.Status400BadRequest,
+                });
+        }
+    }
+
+    /// <summary>
+    /// Whose name goes in a freshly seeded manifest — the organization or owner that holds the
+    /// repository, which is the closest thing to a publisher this repository has.
+    /// </summary>
+    private static string ManifestOwner(SkillsOptions options) =>
+        options.Host == SkillsGitHost.GitHub
+            ? options.GitHub.Owner
+            : options.AzureDevOps.Organization ?? options.MarketplaceName;
 }
 
 /// <summary>
@@ -278,6 +396,53 @@ public sealed record ValidationIssueDto(
     [property: JsonPropertyName("severity")] string Severity,
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("message")] string Message);
+
+/// <summary>
+/// Every field is optional — an empty body provisions exactly what configuration describes.
+/// </summary>
+/// <param name="Segments">
+/// Plugin segments to scaffold. Convenience only: intake registers a segment on first use, so this
+/// just decides what is visible before any skill has been adopted. Ignored when the manifest
+/// already exists, because deciding what segments an initialised repository should have is not
+/// bootstrap.
+/// </param>
+public sealed record ProvisionSkillsRequest(
+    [property: JsonPropertyName("branch")] string? Branch = null,
+    [property: JsonPropertyName("segments")] IReadOnlyList<string>? Segments = null);
+
+/// <param name="Target">
+/// Host and repository as the app resolved them. Echoed back because a wrong target is the failure
+/// that looks like a permissions problem — this is how you find out you provisioned the wrong
+/// repository successfully.
+/// </param>
+/// <param name="WasInitialised">
+/// True when the manifest was already present, i.e. nothing that mattered changed. A 200 with a
+/// null <paramref name="CommitId"/> means "already fine", not "did something".
+/// </param>
+public sealed record ProvisionSkillsResponse(
+    [property: JsonPropertyName("target")] string Target,
+    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("auth")] string Auth,
+    [property: JsonPropertyName("branch")] string Branch,
+    [property: JsonPropertyName("repositoryCreated")] bool RepositoryCreated,
+    [property: JsonPropertyName("wasInitialised")] bool WasInitialised,
+    [property: JsonPropertyName("commitId")] string? CommitId,
+    [property: JsonPropertyName("seededPaths")] IReadOnlyList<string> SeededPaths)
+{
+    public static ProvisionSkillsResponse From(SkillProvisioningResult result, SkillsOptions options) =>
+        new(result.Target,
+            options.Host.ToString(),
+
+            // The mode, never the token. Which credential kind is in play is the first thing
+            // anyone debugging an intake failure needs, and the token itself is the one thing that
+            // must not leave the app.
+            options.Auth.ToString(),
+            result.Branch,
+            result.RepositoryCreated,
+            result.WasInitialised,
+            result.CommitId,
+            result.SeededPaths);
+}
 
 public sealed record CommitSkillResponse(
     [property: JsonPropertyName("commitId")] string CommitId,
