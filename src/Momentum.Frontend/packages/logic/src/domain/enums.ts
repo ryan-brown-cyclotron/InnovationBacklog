@@ -58,9 +58,17 @@ export type SolutionKind = "Strategy" | "CustomSolution" | "Skill";
 
 /**
  * `Momentum.Library.Domain.Engagement.SolutionUseStatus`.
- * Exploring and Implementing are active; Using is the settled end state.
+ *
+ * Exploring and Implementing are active; Using is the settled end state; Withdrawn is
+ * the tombstone — "we stopped using it", or "I clicked this by mistake".
+ *
+ * Withdrawn is a status rather than a delete for the same reason `deleteMilestone`
+ * writes a Cancelled state rather than removing the work item: a real delete silently
+ * changes every historical rollup that counted the row. It also mirrors
+ * `ParticipationStatus.Withdrawn` next door, which is the same act on the same kind of
+ * record.
  */
-export type AdoptionStatus = "Exploring" | "Implementing" | "Using";
+export type AdoptionStatus = "Exploring" | "Implementing" | "Using" | "Withdrawn";
 
 /** `Momentum.Library.Domain.Engagement.ContributionStatus`. */
 export type ParticipationStatus = "Proposed" | "Accepted" | "Rejected" | "Withdrawn";
@@ -87,7 +95,12 @@ export type HubItemType = "Idea" | "Solution";
 // Rules
 // ---------------------------------------------------------------------------
 
-/** Adoptions that have not settled yet. Mirrors `SolutionUse.IsActive`. */
+/**
+ * Adoptions that have not settled yet. Mirrors `SolutionUse.IsActive`.
+ *
+ * Withdrawn is deliberately absent, and is not merely "not active": a withdrawn
+ * adoption is not counted at all. See `adoptionFacts` in dataverse/rollups.ts.
+ */
 export const ACTIVE_ADOPTION_STATUSES: readonly AdoptionStatus[] = ["Exploring", "Implementing"];
 
 export function isActiveAdoption(status: AdoptionStatus): boolean {
@@ -135,6 +148,48 @@ export function sameUser(a: string | null | undefined, b: string | null | undefi
  * affordance and the provider's own check, and nothing more.
  */
 export function canEditSolution(role: Role, isOwner: boolean): boolean {
+  return ownerOrReviewer(role, isOwner);
+}
+
+/**
+ * Who may correct an idea's title, description and tags.
+ *
+ * Its author, and reviewers. The same predicate as `canEditSolution` over a different
+ * subject, and kept as its own name for two reasons: `canEditSolution(role, isAuthor)`
+ * at an idea call site reads as a copy-paste bug, and the two are free to diverge —
+ * an idea's author loses nothing by an edit, whereas a published solution is the
+ * catalog's claim as much as its owner's.
+ *
+ * Same caveat as `canEditSolution`: NOT A SECURITY BOUNDARY. It gates the affordance
+ * and `requireIdeaEditor` in the Azure DevOps provider, and nothing beneath either,
+ * because no ADO process rule can express "the person named in System.CreatedBy".
+ */
+export function canEditIdea(role: Role, isAuthor: boolean): boolean {
+  return ownerOrReviewer(role, isAuthor);
+}
+
+/**
+ * Who may change or withdraw one adoption row.
+ *
+ * The person who recorded it, and reviewers. **Deliberately narrower than
+ * `canEditSolution`: the solution's OWNER is not included.** An adoption is somebody
+ * else's report about their own team, so the owner of the thing being adopted has no
+ * more standing to rewrite it than any other reader — even though they may edit every
+ * other part of the solution. Reviewers are included because somebody has to be able
+ * to clear a row whose author has left.
+ *
+ * Requires `Adoption.startedByMe` rather than a comparison the caller makes itself:
+ * `startedBy` is a Dataverse systemuser GUID and `CurrentUser.id` is an Azure DevOps
+ * UPN, so a call site holding those two values CANNOT determine `isStarter` and will
+ * silently get `false` for the real adopter. The flag is resolved by the provider,
+ * where both ids are GUIDs.
+ */
+export function canManageAdoption(role: Role, isStarter: boolean): boolean {
+  return ownerOrReviewer(role, isStarter);
+}
+
+/** The shape `canEditSolution`, `canEditIdea` and `canManageAdoption` share. */
+function ownerOrReviewer(role: Role, isOwner: boolean): boolean {
   return isOwner || canReview(role);
 }
 

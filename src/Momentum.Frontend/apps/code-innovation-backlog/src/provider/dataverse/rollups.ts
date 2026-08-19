@@ -4,6 +4,7 @@ import { Cycai_votesService } from "../../generated/services/Cycai_votesService.
 import { Cycai_adoptionsService } from "../../generated/services/Cycai_adoptionsService.js";
 import type { Cycai_votes } from "../../generated/models/Cycai_votesModel.js";
 import type { Cycai_adoptions } from "../../generated/models/Cycai_adoptionsModel.js";
+import { adoptionStatusOf } from "./engagement.js";
 import { anyOf, fetchAll, guid } from "./paging.js";
 
 /**
@@ -120,6 +121,9 @@ interface AdoptionFacts {
   completedUses: number;
 }
 
+/** A tombstone: the row is retained for history and counted nowhere. */
+const isWithdrawn = (row: Cycai_adoptions) => adoptionStatusOf(row) === "Withdrawn";
+
 /**
  * Adoption rows for the whole page, grouped by solution id.
  *
@@ -133,6 +137,11 @@ interface AdoptionFacts {
  *  - active vs completed is decided by the COMPLETION TIMESTAMP, not the status
  *    choice. `completeAdoption` happens to set status Using as well, but the status
  *    is a workflow stage and the timestamp is the fact.
+ *
+ * Withdrawn rows are the one case the timestamp cannot decide, and they count in
+ * NOTHING — not `adoptions`, not `teams`, not the active/completed split. A withdrawal
+ * says the adoption is not real, so leaving it in `adoptions` while dropping it from
+ * the panel's list would make the tab header disagree with its own rows.
  */
 async function adoptionFacts(ids: string[]): Promise<Map<string, AdoptionFacts>> {
   const grouped = new Map<string, AdoptionFacts>();
@@ -145,13 +154,27 @@ async function adoptionFacts(ids: string[]): Promise<Map<string, AdoptionFacts>>
     (o) => Cycai_adoptionsService.getAll(o),
     "read adoptions",
     {
-      select: ["cycai_solutionid", "cycai_team", "cycai_projectname", "cycai_completedon"],
+      /*
+        `cycai_adoptionstatus` must be named here, and the trap is the same one
+        `_cycai_voterid_value` documents above: a field left out of the $select is
+        ABSENT from the row, not null. Absent reads as "no status", which falls back to
+        Exploring — so every withdrawn adoption would silently count as an active one,
+        and the count the panel shows would never drop.
+      */
+      select: [
+        "cycai_solutionid",
+        "cycai_team",
+        "cycai_projectname",
+        "cycai_completedon",
+        "cycai_adoptionstatus",
+      ],
       filter: anyOf("cycai_solutionid", numeric),
     },
   );
 
   const teamsBySolution = new Map<string, Set<string>>();
   for (const row of rows) {
+    if (isWithdrawn(row)) continue;
     const id = String(row.cycai_solutionid);
     const facts = grouped.get(id) ?? { adoptions: 0, teams: 0, activeUses: 0, completedUses: 0 };
     facts.adoptions += 1;

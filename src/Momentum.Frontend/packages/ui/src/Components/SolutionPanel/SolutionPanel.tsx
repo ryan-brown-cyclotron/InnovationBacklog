@@ -34,9 +34,30 @@ import { ActivityTab } from "../DetailPanel/ActivityTab";
 import { IssuesTab } from "./IssuesTab";
 import { OverviewTab } from "./OverviewTab";
 import { Tabs, TabPanel, type TabSpec } from "../Tabs/Tabs";
-import { deriveSolutionStatus, personName, relativeTime } from "../../utils";
+import { asRole, deriveSolutionStatus, personName, relativeTime } from "../../utils";
 
 export type SolutionTab = "overview" | "activity" | "issues" | "adoption";
+
+/**
+ * What a mutation changed, so the refresh that follows it reloads that and not the
+ * whole panel.
+ *
+ * Every mutation used to refresh everything, which cost the full open — six routes —
+ * and reset `issues` and `milestones` to "not asked yet" on the way. That is not a
+ * flicker: an undefined `issues` REMOVES the Issues tab, and a removed active tab
+ * falls back to Overview, so reporting an issue from the Issues tab threw the reader
+ * out of it and back. Naming what changed fixes both at once.
+ *
+ * `"solution"` means the record itself — a field, a link, anything the header or the
+ * catalogue behind the panel shows — and still reloads everything.
+ */
+export type SolutionRefresh =
+  | "solution"
+  | "requests"
+  | "comments"
+  | "use"
+  | "issues"
+  | "milestones";
 
 /** Namespaces this strip's DOM ids. See `Tabs`. */
 const GROUP = "solution";
@@ -92,7 +113,7 @@ export function SolutionPanel({
   onTabChange?: (tab: SolutionTab) => void;
   onClose: () => void;
   onOpenRequest: (request: Request) => void;
-  onRefresh: () => Promise<void>;
+  onRefresh: (changed?: SolutionRefresh) => Promise<void>;
 }): React.ReactElement {
   const api = useApi();
   // One overlay pane at a time, layered over the modal.
@@ -127,7 +148,9 @@ export function SolutionPanel({
 
   // -------------------------------------------------------------------------
   // Mutations. Every one refreshes rather than patching local state, so the
-  // panel cannot drift from what the next reader will load.
+  // panel cannot drift from what the next reader will load — but each one names
+  // what it changed, so the refresh is that list and not all six. See
+  // SolutionRefresh.
   // -------------------------------------------------------------------------
 
   const patchSolution = async (body: Record<string, unknown>) => {
@@ -147,7 +170,7 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify({ ...draft, subjectType: "Solution" }),
     });
-    await onRefresh();
+    await onRefresh("comments");
   }
 
   async function linkNeed(requestId: string) {
@@ -155,7 +178,7 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify({ solutionId: solution.id }),
     });
-    await onRefresh();
+    await onRefresh("requests");
   }
 
   async function unlinkNeed(requestId: string) {
@@ -163,7 +186,7 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify({ solutionId: solution.id }),
     });
-    await onRefresh();
+    await onRefresh("requests");
   }
 
   async function setAdoptionStatus(useId: string, status: string) {
@@ -171,7 +194,17 @@ export function SolutionPanel({
       method: "PATCH",
       body: JSON.stringify({ status }),
     });
-    await onRefresh();
+    await onRefresh("use");
+  }
+
+  /*
+    POST .../withdraw, not DELETE: the row is retained with a Withdrawn status and drops
+    out of the list and the counts. `"use"` reloads the adoptions and the activity feed,
+    which is the only place the withdrawal remains visible.
+  */
+  async function withdrawAdoption(useId: string) {
+    await api(`/api/solutions/${solution.id}/use/${useId}/withdraw`, { method: "POST" });
+    await onRefresh("use");
   }
 
   async function reportIssue(input: { title: string; description: string }) {
@@ -179,7 +212,7 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify(input),
     });
-    await onRefresh();
+    await onRefresh("issues");
   }
 
   async function setIssueStatus(issueId: string, status: SolutionIssueStatus) {
@@ -187,7 +220,7 @@ export function SolutionPanel({
       method: "PATCH",
       body: JSON.stringify({ status }),
     });
-    await onRefresh();
+    await onRefresh("issues");
   }
 
   async function createMilestone() {
@@ -195,7 +228,7 @@ export function SolutionPanel({
       method: "POST",
       body: JSON.stringify({ title: "New milestone", status: "Planned" }),
     });
-    await onRefresh();
+    await onRefresh("milestones");
   }
 
   async function updateMilestone(
@@ -206,12 +239,12 @@ export function SolutionPanel({
       method: "PATCH",
       body: JSON.stringify(patch),
     });
-    await onRefresh();
+    await onRefresh("milestones");
   }
 
   async function deleteMilestone(id: string) {
     await api(`/api/solutions/${solution.id}/milestones/${id}`, { method: "DELETE" });
-    await onRefresh();
+    await onRefresh("milestones");
   }
 
   // -------------------------------------------------------------------------
@@ -279,12 +312,13 @@ export function SolutionPanel({
             </button>
           )}
           {/*
-            A chip, not a flipped primary button. Whether one of these adoptions is
-            YOURS is a display-name match across two identity stores, so it is right
-            often but not always — and a primary action that occasionally lies about
-            what it will do is far worse than a badge that occasionally goes missing.
+            A chip rather than a flipped primary button. It used to be hedged this way
+            because "is one of these yours" was a display-name match across two identity
+            stores; `startedByMe` makes it exact, so the chip is now simply a statement
+            of fact. Left as a chip because the header keeps only actions no tab owns,
+            and Adoption owns the verb.
           */}
-          {usesThis(adoptions, currentUserId) && (
+          {usesThis(adoptions) && (
             <span className={styles.usingChip}>✓ You are using this</span>
           )}
           {/*
@@ -330,7 +364,7 @@ export function SolutionPanel({
               solutionId={solution.id}
               onDone={async () => {
                 setPane(null);
-                await onRefresh();
+                await onRefresh("use");
               }}
               onCancel={() => setPane(null)}
             />
@@ -346,7 +380,9 @@ export function SolutionPanel({
               itemType="solutions"
               itemId={solution.id}
               visibility={visibility}
-              onChanged={onRefresh}
+              // Wrapped, not passed: visibility is a field on the record, and a
+              // bare reference would hand this whatever argument the control emits.
+              onChanged={() => onRefresh("solution")}
             />
           </OverlayPane>
 
@@ -431,8 +467,10 @@ export function SolutionPanel({
             adoptions={adoptions}
             adoptionCount={adoptionCount}
             teams={teams}
+            role={asRole(role)}
             onRecord={() => setPane("adopt")}
             onSetStatus={setAdoptionStatus}
+            onWithdraw={withdrawAdoption}
           />
         </TabPanel>
       )}
@@ -443,19 +481,19 @@ export function SolutionPanel({
 export { headline as adoptionHeadline };
 
 /**
- * Whether one of these adoptions looks like the reader's own.
+ * Whether one of these adoptions is the reader's own.
  *
- * Best effort, deliberately. `Adoption.startedBy` is a Dataverse systemuser GUID
- * while `CurrentUser.id` is a UPN — two id spaces that cannot be joined client-side
- * (see CHECKPOINT.md) — so this falls back to the resolved display name. It is used
- * only to show a badge, never to gate an action.
+ * Now exact, and no longer a guess. This used to compare `Adoption.startedBy` — a
+ * Dataverse systemuser GUID — against `CurrentUser.id`, a UPN, and fall back to matching
+ * resolved display names when that failed, because the two id spaces cannot be joined
+ * client-side. `startedByMe` is resolved by the provider, where both ids are GUIDs, so
+ * the join happens in the one place it can be correct.
+ *
+ * The display-name fallback is gone rather than kept as a backstop: it was wrong in both
+ * directions — two people sharing a name matched, and a name that failed to resolve did
+ * not — and the same flag now gates the row's controls, where being right often is not
+ * good enough.
  */
-function usesThis(adoptions: SolutionUse[], currentUserId: string | null): boolean {
-  if (!currentUserId) return false;
-  const me = personName(currentUserId).trim().toLowerCase();
-  if (!me) return false;
-  return adoptions.some((use) => {
-    if (sameUser(use.startedBy, currentUserId)) return true;
-    return (use.startedByName ?? "").trim().toLowerCase() === me;
-  });
+function usesThis(adoptions: SolutionUse[]): boolean {
+  return adoptions.some((use) => use.startedByMe === true);
 }

@@ -1,6 +1,7 @@
 import type React from "react";
 import styles from "./styles";
 import type {
+  PendingLink,
   Request,
   SearchResult,
   Solution,
@@ -11,7 +12,7 @@ import { GlanceStats } from "../DetailPanel/GlanceStats";
 import { LinkedItems } from "../DetailPanel/LinkedItems";
 import { TagEditor } from "../TagEditor/TagEditor";
 import { useApi } from "../../Hooks/useApi";
-import { deriveSolutionStatus } from "../../utils";
+import { deriveSolutionStatus, personName, relativeTime } from "../../utils";
 
 /**
  * What the idea is, and what people are doing about it.
@@ -23,8 +24,10 @@ import { deriveSolutionStatus } from "../../utils";
 export function IdeaOverviewTab({
   request,
   linkedSolutions,
+  proposedLinks = [],
   solutionSummary,
   canEdit,
+  canUnlink,
   stats,
   onOpenSolution,
   onSaveDescription,
@@ -33,9 +36,21 @@ export function IdeaOverviewTab({
   onUnlink,
 }: {
   request: Request;
+  /** APPROVED links — Azure DevOps relations, written only on approval. */
   linkedSolutions: Solution[];
+  /** Proposed and undecided, so a proposer can see their own suggestion. */
+  proposedLinks?: PendingLink[];
   solutionSummary: SolutionSummary;
   canEdit: boolean;
+  /**
+   * Whether the reader may disconnect a solution from this idea.
+   *
+   * Separate from `canEdit`, which is about the IDEA. Unlinking is keyed on the
+   * solution — the link is a claim about what that solution answers — so the idea's own
+   * author has no standing over it, and only a reviewer is certain to be permitted from
+   * this side. Suggesting a solution stays open to everyone.
+   */
+  canUnlink: boolean;
   stats: { label: string; value: number | undefined }[];
   onOpenSolution: (solution: Solution) => void;
   onSaveDescription: (description: string) => Promise<void>;
@@ -66,6 +81,7 @@ export function IdeaOverviewTab({
           searchLabel="Search solutions to suggest…"
           noResultsText="No solutions found."
           removeVerb="Remove"
+          canUnlink={canUnlink}
           items={linkedSolutions.map((solution) => {
             const summary = solutionSummary[solution.id];
             const teams = summary?.teams ?? 0;
@@ -79,11 +95,21 @@ export function IdeaOverviewTab({
                   : stage,
             };
           })}
+          pendingItems={proposedLinks.map((link) => ({
+            id: link.solutionId,
+            title: link.solutionTitle,
+            meta: `Proposed by ${personName(link.addedBy)} · ${relativeTime(link.addedAt)}`,
+          }))}
           search={async (query) => {
             const result = await api<SearchResult>(
               `/api/solutions?query=${encodeURIComponent(query)}&take=10`,
             );
-            const linked = new Set(linkedSolutions.map((each) => each.id));
+            // Already proposed counts as already suggested: offering it again would
+            // produce a second click that the store answers with the same proposal.
+            const linked = new Set([
+              ...linkedSolutions.map((each) => each.id),
+              ...proposedLinks.map((each) => each.solutionId),
+            ]);
             return result.items.filter((item) => !linked.has(item.itemId));
           }}
           onOpen={(id) => {

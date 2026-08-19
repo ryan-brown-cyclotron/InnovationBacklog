@@ -1,13 +1,13 @@
 {
-  "name": "cycai_adoption",
-  "title": "Adoptions",
+  "name": "cycai_link",
+  "title": "Links",
   "schema": {
     "type": "array",
     "items": {
       "type": "object",
       "x-ms-dataverse-entity": true,
-      "x-ms-dataverse-entityset": "cycai_adoptions",
-      "x-ms-dataverse-primary-id": "cycai_adoptionid",
+      "x-ms-dataverse-entityset": "cycai_links",
+      "x-ms-dataverse-primary-id": "cycai_linkid",
       "x-ms-dataverse-primary-name": "cycai_name",
       "properties": {
         "createdby": {
@@ -72,64 +72,103 @@
           "required": true,
           "maxLength": 100
         },
-        "cycai_adoptionid": {
+        "cycai_approvalstate": {
           "type": "string",
-          "title": "Adoption",
-          "x-ms-dataverse-attribute": "cycai_adoptionid",
-          "x-ms-dataverse-type": "UniqueidentifierType",
-          "x-ms-schema-name": "cycai_adoptionId",
-          "x-ms-dataverse-primary-id": true,
-          "required": true,
-          "x-ms-keyType": "primary"
-        },
-        "cycai_adoptionstatus": {
-          "type": "string",
-          "title": "Status",
-          "x-ms-dataverse-attribute": "cycai_adoptionstatus",
+          "title": "Approval",
+          "x-ms-dataverse-attribute": "cycai_approvalstate",
           "x-ms-dataverse-type": "PicklistType",
-          "x-ms-schema-name": "cycai_adoptionstatus",
+          "x-ms-schema-name": "cycai_approvalstate",
           "required": true,
           "enum": [
-            "Exploring",
-            "Implementing",
-            "Using",
-            "Withdrawn"
+            "Pending",
+            "Approved",
+            "Rejected"
           ],
           "x-ms-enum-values": [
             100000000,
             100000001,
-            100000002,
-            100000003
+            100000002
           ],
           "Color": [
             null,
             null,
-            null,
             null
           ],
-          "x-ms-optionsetmetadataid": "183114c6-f331-4f04-af2f-62079e4828a9",
+          "x-ms-optionsetmetadataid": "2d4b90af-b3f0-4f29-a8e9-8418734c0aec",
           "x-ms-isGlobal": true,
-          "x-ms-optionsetdisplayname": "Adoption Status",
+          "x-ms-optionsetdisplayname": "Approval State",
           "x-ms-optionSetType": "Picklist"
         },
-        "cycai_adoptionstatusname": {
+        "cycai_approvalstatename": {
           "type": "string",
-          "title": "cycai_adoptionstatusname",
-          "x-ms-dataverse-attribute": "cycai_adoptionstatusname",
+          "title": "cycai_approvalstatename",
+          "x-ms-dataverse-attribute": "cycai_approvalstatename",
           "x-ms-dataverse-type": "VirtualType",
-          "x-ms-schema-name": "cycai_adoptionstatusName",
+          "x-ms-schema-name": "cycai_approvalstateName",
           "x-ms-read-only": true
         },
-        "cycai_completedon": {
+        "cycai_decidedbyid": {
           "type": "string",
-          "title": "Completed On",
-          "x-ms-dataverse-attribute": "cycai_completedon",
+          "title": "Decided By",
+          "x-ms-dataverse-attribute": "cycai_decidedbyid",
+          "x-ms-dataverse-type": "LookupType",
+          "x-ms-schema-name": "cycai_decidedbyid"
+        },
+        "cycai_decidedbyidname": {
+          "type": "string",
+          "title": "cycai_decidedbyidname",
+          "x-ms-dataverse-attribute": "cycai_decidedbyidname",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "cycai_decidedbyidName",
+          "x-ms-read-only": true,
+          "maxLength": 200
+        },
+        "cycai_decidedbyidyominame": {
+          "type": "string",
+          "title": "cycai_decidedbyidyominame",
+          "x-ms-dataverse-attribute": "cycai_decidedbyidyominame",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "cycai_decidedbyidYomiName",
+          "x-ms-read-only": true,
+          "maxLength": 200
+        },
+        "cycai_decidedon": {
+          "type": "string",
+          "title": "Decided On",
+          "x-ms-dataverse-attribute": "cycai_decidedon",
           "x-ms-dataverse-type": "DateTimeType",
-          "x-ms-schema-name": "cycai_completedon"
+          "x-ms-schema-name": "cycai_decidedon"
+        },
+        "cycai_ideaid": {
+          "type": "string",
+          "title": "Idea Id",
+          "x-ms-dataverse-attribute": "cycai_ideaid",
+          "x-ms-dataverse-type": "IntegerType",
+          "x-ms-schema-name": "cycai_ideaid",
+          "required": true
+        },
+        "cycai_linkid": {
+          "type": "string",
+          "title": "Link",
+          "x-ms-dataverse-attribute": "cycai_linkid",
+          "x-ms-dataverse-type": "UniqueidentifierType",
+          "x-ms-schema-name": "cycai_linkId",
+          "x-ms-dataverse-primary-id": true,
+          "required": true,
+          "x-ms-keyType": "primary"
+        },
+        "cycai_linkkey": {
+          "type": "string",
+          "title": "Link Key",
+          "x-ms-dataverse-attribute": "cycai_linkkey",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "cycai_linkkey",
+          "required": true,
+          "maxLength": 100
         },
         "cycai_name": {
           "type": "string",
-          "title": "Project Name",
+          "title": "Link Key",
           "x-ms-dataverse-attribute": "cycai_name",
           "x-ms-dataverse-type": "StringType",
           "x-ms-schema-name": "cycai_name",
@@ -137,14 +176,38 @@
           "required": true,
           "maxLength": 200
         },
-        "cycai_projectname": {
+        "cycai_proposedbyid": {
           "type": "string",
-          "title": "Project Name",
-          "x-ms-dataverse-attribute": "cycai_projectname",
+          "title": "Proposed By",
+          "x-ms-dataverse-attribute": "cycai_proposedbyid",
+          "x-ms-dataverse-type": "LookupType",
+          "x-ms-schema-name": "cycai_proposedbyid"
+        },
+        "cycai_proposedbyidname": {
+          "type": "string",
+          "title": "cycai_proposedbyidname",
+          "x-ms-dataverse-attribute": "cycai_proposedbyidname",
           "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "cycai_projectname",
-          "required": true,
+          "x-ms-schema-name": "cycai_proposedbyidName",
+          "x-ms-read-only": true,
           "maxLength": 200
+        },
+        "cycai_proposedbyidyominame": {
+          "type": "string",
+          "title": "cycai_proposedbyidyominame",
+          "x-ms-dataverse-attribute": "cycai_proposedbyidyominame",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "cycai_proposedbyidYomiName",
+          "x-ms-read-only": true,
+          "maxLength": 200
+        },
+        "cycai_rationale": {
+          "type": "string",
+          "title": "Rationale",
+          "x-ms-dataverse-attribute": "cycai_rationale",
+          "x-ms-dataverse-type": "MemoType",
+          "x-ms-schema-name": "cycai_rationale",
+          "maxLength": 4000
         },
         "cycai_solutionid": {
           "type": "string",
@@ -153,46 +216,6 @@
           "x-ms-dataverse-type": "IntegerType",
           "x-ms-schema-name": "cycai_solutionid",
           "required": true
-        },
-        "cycai_startedbyid": {
-          "type": "string",
-          "title": "Started By",
-          "x-ms-dataverse-attribute": "cycai_startedbyid",
-          "x-ms-dataverse-type": "LookupType",
-          "x-ms-schema-name": "cycai_startedbyid"
-        },
-        "cycai_startedbyidname": {
-          "type": "string",
-          "title": "cycai_startedbyidname",
-          "x-ms-dataverse-attribute": "cycai_startedbyidname",
-          "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "cycai_startedbyidName",
-          "x-ms-read-only": true,
-          "maxLength": 200
-        },
-        "cycai_startedbyidyominame": {
-          "type": "string",
-          "title": "cycai_startedbyidyominame",
-          "x-ms-dataverse-attribute": "cycai_startedbyidyominame",
-          "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "cycai_startedbyidYomiName",
-          "x-ms-read-only": true,
-          "maxLength": 200
-        },
-        "cycai_startedon": {
-          "type": "string",
-          "title": "Started On",
-          "x-ms-dataverse-attribute": "cycai_startedon",
-          "x-ms-dataverse-type": "DateTimeType",
-          "x-ms-schema-name": "cycai_startedon"
-        },
-        "cycai_team": {
-          "type": "string",
-          "title": "Team",
-          "x-ms-dataverse-attribute": "cycai_team",
-          "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "cycai_team",
-          "maxLength": 200
         },
         "importsequencenumber": {
           "type": "string",
@@ -359,7 +382,7 @@
             null,
             null
           ],
-          "x-ms-optionsetmetadataid": "eb635d60-0d97-f111-8076-7c1e528d607c",
+          "x-ms-optionsetmetadataid": "e7a5c649-3e97-f111-8075-6045bd00dd8c",
           "x-ms-isGlobal": false,
           "x-ms-optionsetdisplayname": "Status",
           "x-ms-optionSetType": "State"
@@ -390,7 +413,7 @@
             null,
             null
           ],
-          "x-ms-optionsetmetadataid": "f5635d60-0d97-f111-8076-7c1e528d607c",
+          "x-ms-optionsetmetadataid": "f2a5c649-3e97-f111-8075-6045bd00dd8c",
           "x-ms-isGlobal": false,
           "x-ms-optionsetdisplayname": "Status Reason",
           "x-ms-optionSetType": "Status"
@@ -429,10 +452,11 @@
       "required": [
         "createdbyyominame",
         "createdonbehalfbyyominame",
-        "cycai_adoptionid",
-        "cycai_adoptionstatus",
+        "cycai_approvalstate",
+        "cycai_ideaid",
+        "cycai_linkid",
+        "cycai_linkkey",
         "cycai_name",
-        "cycai_projectname",
         "cycai_solutionid",
         "modifiedbyyominame",
         "modifiedonbehalfbyyominame",

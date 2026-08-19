@@ -21,13 +21,25 @@ export interface MemoryVote {
   createdAt: string;
 }
 
+/**
+ * An adoption as the STORE holds it.
+ *
+ * `startedByMe` is deliberately absent: it is not a property of the record, it is the
+ * answer to "is this the caller's" and therefore per-reader. The provider projects it on
+ * the way out, which is the same thing the Dataverse adapter does — there the flag is a
+ * join between a systemuser GUID on the row and the caller's own GUID, and here it is a
+ * comparison against `currentUserId`. Storing it would let a seeded row assert whose it
+ * is, which is exactly the mistake the flag exists to prevent.
+ */
+export type AdoptionRow = Omit<Adoption, "startedByMe">;
+
 export interface MemorySeed {
   currentUserId: string;
   users: UserRef[];
   ideas: Idea[];
   solutions: Solution[];
   votes: MemoryVote[];
-  adoptions: Adoption[];
+  adoptions: AdoptionRow[];
   comments: Comment[];
   participation: Participation[];
   links: IdeaSolutionLink[];
@@ -198,7 +210,14 @@ const VOTES: MemoryVote[] = [
   })),
 ];
 
-const ADOPTIONS: Adoption[] = [
+/*
+  Every adoption here but one belongs to somebody other than `currentUserId`, which is
+  what makes the refused half of `canManageAdoption` reachable: opening s-201 as a
+  Submitter must show read-only rows. `a-306` is the caller's own, so the permitted half
+  is reachable too — without it the demo could only ever exercise the refusal, and the
+  stage select and withdraw control would look broken rather than gated.
+*/
+const ADOPTIONS: AdoptionRow[] = [
   { id: "a-301", solutionId: "s-201", startedBy: "u-devin", projectName: "Partner Portal",
     team: "Experience", status: "Using", startedAt: "2026-03-01T09:00:00Z",
     updatedAt: "2026-04-10T09:00:00Z", completedAt: "2026-04-10T09:00:00Z" },
@@ -214,6 +233,14 @@ const ADOPTIONS: Adoption[] = [
   { id: "a-305", solutionId: "s-206", startedBy: "u-jordan", projectName: "Billing",
     team: "Revenue", status: "Implementing", startedAt: "2026-07-01T09:00:00Z",
     updatedAt: "2026-07-19T09:00:00Z", completedAt: null },
+  // The caller's own, so the setter branch of `canManageAdoption` is reachable.
+  { id: "a-306", solutionId: "s-201", startedBy: "u-avery", projectName: "Research Desk",
+    team: "Insights", status: "Exploring", startedAt: "2026-07-22T09:00:00Z",
+    updatedAt: "2026-07-22T09:00:00Z", completedAt: null },
+  // A tombstone: excluded from listAdoptions and from every count, retained for history.
+  { id: "a-307", solutionId: "s-202", startedBy: "u-ellis", projectName: "Legacy Intake",
+    team: "Operations", status: "Withdrawn", startedAt: "2026-04-02T09:00:00Z",
+    updatedAt: "2026-06-11T09:00:00Z", completedAt: null },
 ];
 
 const COMMENTS: Comment[] = [
@@ -242,10 +269,24 @@ const PARTICIPATION: Participation[] = [
     decidedAt: "2026-06-27T09:00:00Z" },
 ];
 
+/*
+  Approved links plus one pending proposal, so the review queue has something in it and
+  the "proposed but not yet true" state is reachable in the demo. Without the last row
+  the links tab could only ever render empty, which reads as broken rather than as done.
+*/
 const LINKS: IdeaSolutionLink[] = [
-  { ideaId: "i-102", solutionId: "s-201", addedBy: "u-avery", addedAt: "2026-03-13T09:00:00Z" },
-  { ideaId: "i-101", solutionId: "s-202", addedBy: "u-avery", addedAt: "2026-03-07T09:00:00Z" },
-  { ideaId: "i-104", solutionId: "s-203", addedBy: "u-avery", addedAt: "2026-04-19T09:00:00Z" },
+  { ideaId: "i-102", solutionId: "s-201", addedBy: "u-avery", addedAt: "2026-03-13T09:00:00Z",
+    approval: "Approved", decidedBy: "u-blake", rationale: "Covers the whole request.",
+    decidedAt: "2026-03-14T09:00:00Z" },
+  { ideaId: "i-101", solutionId: "s-202", addedBy: "u-avery", addedAt: "2026-03-07T09:00:00Z",
+    approval: "Approved", decidedBy: "u-blake", rationale: "Direct answer.",
+    decidedAt: "2026-03-08T09:00:00Z" },
+  { ideaId: "i-104", solutionId: "s-203", addedBy: "u-avery", addedAt: "2026-04-19T09:00:00Z",
+    approval: "Approved", decidedBy: "u-blake", rationale: "Already in use for this.",
+    decidedAt: "2026-04-20T09:00:00Z" },
+  // Waiting on a reviewer, proposed by somebody who is not the seed's current user.
+  { ideaId: "i-107", solutionId: "s-206", addedBy: "u-ellis", addedAt: "2026-07-20T09:00:00Z",
+    approval: "Pending", decidedBy: null, rationale: null, decidedAt: null },
 ];
 
 const ACTIVITY: ActivityEntry[] = [

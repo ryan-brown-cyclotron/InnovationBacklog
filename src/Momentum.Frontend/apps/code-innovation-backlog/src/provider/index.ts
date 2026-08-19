@@ -15,13 +15,14 @@ import { createEnvironmentReader } from "./environment.js";
 import { createIdentityProvider } from "./dataverse/identity.js";
 import { createEngagementProvider } from "./dataverse/engagement.js";
 import { createCollaborationProvider } from "./dataverse/collaboration.js";
+import { createLinkStore } from "./dataverse/links.js";
 import { createRollupReader } from "./dataverse/rollups.js";
 import { createInsightsProvider } from "./insights.js";
 import { createAdoClient } from "./ado/client.js";
 import { createAttachmentsApi } from "./ado/attachments.js";
 import { createCommentsApi } from "./ado/comments.js";
 import { createRoleResolver } from "./ado/role.js";
-import { createWorkItemFacts } from "./ado/workitems.js";
+import { createWorkItemFacts, createWorkItemLoader } from "./ado/workitems.js";
 import {
   createApprovalsProvider,
   createIdeasProvider,
@@ -74,6 +75,12 @@ export function createCodeAppProvider(
   // by identity — so the client is built first and shared by both halves.
   const ado = createAdoClient(environment.read);
 
+  // ONE loader for the whole adapter, and that is the point: it coalesces the ids
+  // requested within a tick into a single `workitemsbatch`, which only works if the
+  // call sites doing the requesting — linked ideas, issues, milestones, search —
+  // share it. Built here for the same reason the client is.
+  const loader = createWorkItemLoader(ado);
+
   const identity = createIdentityProvider({
     getContext,
     // Derived from effective area-path permissions rather than group membership:
@@ -86,6 +93,9 @@ export function createCodeAppProvider(
 
   const engagement = createEngagementProvider({
     currentUserId: identity.currentSystemUserId,
+    // Managing an adoption row is open to the person who recorded it and to reviewers,
+    // so the provider needs both the caller's identity and their role.
+    role,
     // Adoptions store the adopter as a Dataverse lookup, so the list needs names for
     // GUIDs. Optional on the contract: without it the list keeps the id.
     resolveUsers: identity.resolveUsers?.bind(identity),
@@ -110,6 +120,7 @@ export function createCodeAppProvider(
   // the UPN can ever match it.
   const items = {
     client: ado,
+    loader,
     rollups,
     role,
     currentUserId: async () => (await identity.getCurrentUser())?.id ?? null,
@@ -139,13 +150,22 @@ export function createCodeAppProvider(
 
     ideas: createIdeasProvider(items),
     solutions: createSolutionsProvider(items),
-    approvals: createApprovalsProvider(items),
-    search: createSearch(ado, role),
+    /*
+      The only provider handed both stores, and it needs both: a link is PROPOSED into
+      Dataverse and, once approved, written to Azure DevOps as a `Related` relation.
+      Keeping the store out of `items` is deliberate — nothing else should be able to
+      reach approval state, or the readers would start filtering on it.
+    */
+    approvals: createApprovalsProvider({
+      ...items,
+      links: createLinkStore({ currentUserId: identity.currentSystemUserId }),
+    }),
+    search: createSearch(loader, role),
 
     // Spans both stores and belongs to neither, so it sits at the adapter root
     // rather than inside ado/ or dataverse/.
     insights: createInsightsProvider({
-      client: ado,
+      loader,
       itemFacts,
       // The contributors panel names people; the audit table only has their GUIDs.
       resolveUsers: identity.resolveUsers?.bind(identity),

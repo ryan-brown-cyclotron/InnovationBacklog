@@ -10,6 +10,7 @@ import type {
   ContributionKind,
   DiscoveryItem,
   DiscoveryScope,
+  PendingLink,
   Request,
   RequestSummary,
   Solution,
@@ -27,6 +28,7 @@ import { Topbar } from "./Components/Topbar/Topbar";
 import { RequestPanel } from "./Components/RequestPanel/RequestPanel";
 import {
   SolutionPanel,
+  type SolutionRefresh,
   type SolutionTab,
 } from "./Components/SolutionPanel/SolutionPanel";
 import { Home } from "./Pages/Home/Home";
@@ -41,6 +43,40 @@ type UserWithRole = AppUser & { role?: string };
 const SOLUTION_TABS = ["overview", "activity", "issues", "adoption"] as const;
 
 /** A ?tab= param is user input, so it is validated rather than cast. */
+/** The solution panel's independently-loadable lists. */
+type SolutionSlice = "requests" | "comments" | "activity" | "use" | "issues" | "milestones";
+
+/**
+ * What a mutation changed -> what has to be read again.
+ *
+ * Activity is in every entry because every mutation writes an activity row. The rest
+ * is deliberately narrow: adding a milestone cannot change the comment thread, and
+ * reloading it anyway is what made a one-row edit cost a whole panel open.
+ */
+const REFRESHED_BY: Record<SolutionRefresh, readonly SolutionSlice[] | undefined> = {
+  // The record itself changed — state, visibility, a field. Everything is suspect.
+  solution: undefined,
+  requests: ["requests", "activity"],
+  comments: ["comments", "activity"],
+  use: ["use", "activity"],
+  issues: ["issues", "activity"],
+  milestones: ["milestones", "activity"],
+};
+
+/**
+ * Whether a change can alter what the list behind the panel shows.
+ *
+ * Rollups count Related links and `System.CommentCount`. Issues and milestones hang
+ * off a Parent link and are counted by neither, so reloading the workspace after one
+ * is a page of requests for numbers that cannot have moved.
+ */
+const CHANGES_THE_LIST: ReadonlySet<SolutionRefresh> = new Set<SolutionRefresh>([
+  "solution",
+  "requests",
+  "comments",
+  "use",
+]);
+
 function isSolutionTab(value: string | null): value is SolutionTab {
   return Boolean(value) && (SOLUTION_TABS as readonly string[]).includes(value!);
 }
@@ -60,6 +96,9 @@ export function App(): React.ReactElement {
   const [requestActivity, setRequestActivity] = useState<ActivityRecord[]>([]);
   const [requestDecisions, setRequestDecisions] = useState<AcceptanceDecision[]>([]);
   const [linkedSolutions, setLinkedSolutions] = useState<Solution[]>([]);
+  // Proposed and undecided. Separate from `linkedSolutions` because those are approved
+  // ADO relations and these exist only in Dataverse until somebody decides.
+  const [proposedLinks, setProposedLinks] = useState<PendingLink[]>([]);
   const [linkedNeeds, setLinkedNeeds] = useState<Request[]>([]);
   const [solutionComments, setSolutionComments] = useState<Comment[]>([]);
   const [solutionActivity, setSolutionActivity] = useState<ActivityRecord[]>([]);
@@ -146,20 +185,27 @@ export function App(): React.ReactElement {
     if (selectedSolution) syncModalUrl("solution", selectedSolution.id, tab);
   }
 
-  async function openRequest(request: Request) {
-    syncModalUrl("need", request.id);
-    // Only one engagement modal at a time.
-    setSelectedSolution(null);
-    setSolutionAdoptionOpen(false);
-    setSelected(request);
+  /**
+   * The idea panel's own reads, which need the id and nothing else.
+   *
+   * Split out of `openRequest` so `openDiscovery` can start them at the same moment
+   * it asks for the record itself instead of afterwards — the two were sequential
+   * only because the code was, not because either needed the other's answer.
+   * Rejections are handled here, so the returned promise is always safe to await.
+   */
+  async function loadRequestDetail(requestId: string) {
     try {
-      const [nextComments, nextActivity, nextLinkedSolutions, nextDecisions] = await Promise.allSettled([
-        api<Comment[]>(`/api/requests/${request.id}/comments`),
-        api<ActivityRecord[]>(`/api/requests/${request.id}/activity`),
-        api<Solution[]>(`/api/requests/${request.id}/solutions`),
+      const [nextComments, nextActivity, nextLinkedSolutions, nextDecisions, nextProposed] =
+        await Promise.allSettled([
+        api<Comment[]>(`/api/requests/${requestId}/comments`),
+        api<ActivityRecord[]>(`/api/requests/${requestId}/activity`),
+        // Approved links only: these are ADO relations, and nothing reaches ADO before
+        // a reviewer approves it. Proposals come from `/proposed` below.
+        api<Solution[]>(`/api/requests/${requestId}/solutions`),
         canGovern
-          ? api<AcceptanceDecision[]>(`/api/requests/${request.id}/decisions`)
+          ? api<AcceptanceDecision[]>(`/api/requests/${requestId}/decisions`)
           : Promise.resolve<AcceptanceDecision[]>([]),
+        api<PendingLink[]>(`/api/requests/${requestId}/proposed`),
       ]);
       if (nextComments.status === "fulfilled") setRequestComments(nextComments.value);
       else setError(errorText(nextComments.reason));
@@ -171,9 +217,26 @@ export function App(): React.ReactElement {
         nextLinkedSolutions.status === "fulfilled" ? nextLinkedSolutions.value : [],
       );
       setRequestDecisions(nextDecisions.status === "fulfilled" ? nextDecisions.value : []);
+      // Same degrade-to-empty as the two above: a proposal that cannot be read should
+      // cost the pending row, not the panel.
+      setProposedLinks(nextProposed.status === "fulfilled" ? nextProposed.value : []);
     } catch (reason) {
       setError(errorText(reason));
     }
+  }
+
+  /**
+   * `loading` is the fan-out `openDiscovery` already started for this id. Passed
+   * rather than remembered in a ref: the promise cannot get out of step with the
+   * panel the way a flag can, and every other caller simply omits it.
+   */
+  async function openRequest(request: Request, loading?: Promise<void>) {
+    syncModalUrl("need", request.id);
+    // Only one engagement modal at a time.
+    setSelectedSolution(null);
+    setSolutionAdoptionOpen(false);
+    setSelected(request);
+    await (loading ?? loadRequestDetail(request.id));
   }
 
   async function runSearch(scope: DiscoveryScope = "all") {
@@ -191,15 +254,32 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function openSolution(solution: Solution, tab: SolutionTab = "overview") {
-    syncModalUrl("solution", solution.id, tab);
-    // Only one engagement modal at a time.
-    setSelected(null);
-    setSelectedSolution(solution);
-    setSolutionTab(tab);
-    // Reset to "not asked yet" so the previous solution's tabs cannot linger.
-    setSolutionIssues(undefined);
-    setSolutionMilestones(undefined);
+  /**
+   * The solution panel's own reads. Same split as `loadRequestDetail`, and the
+   * "not asked yet" reset belongs HERE rather than in `openSolution`: when the
+   * fan-out is started early, a reset left behind in the opener would run after
+   * these have already answered and blank the tabs they just filled.
+   *
+   * `fresh` says a DIFFERENT solution is arriving, which is the only time blanking
+   * is right. A refresh after a mutation is looking at the same solution, and
+   * blanking there removes the Issues tab from under the reader — see
+   * `SolutionRefresh`.
+   *
+   * `only` narrows the fan-out to the lists a mutation actually changed. Activity is
+   * always included: every mutation writes an activity row.
+   */
+  async function loadSolutionDetail(
+    solutionId: string,
+    options: { fresh?: boolean; only?: readonly SolutionSlice[] } = {},
+  ) {
+    const { fresh = false, only } = options;
+    const wanted = (slice: SolutionSlice) => !only || only.includes(slice);
+
+    if (fresh) {
+      // So the previous solution's tabs cannot linger.
+      setSolutionIssues(undefined);
+      setSolutionMilestones(undefined);
+    }
     try {
       const [
         nextNeeds,
@@ -209,37 +289,71 @@ export function App(): React.ReactElement {
         nextIssues,
         nextMilestones,
       ] = await Promise.allSettled([
-        api<Request[]>(`/api/solutions/${solution.id}/requests`),
-        api<Comment[]>(`/api/solutions/${solution.id}/comments`),
-        api<ActivityRecord[]>(`/api/solutions/${solution.id}/activity`),
+        // A slice nobody asked for is `null` rather than a request. Settled either
+        // way, so the positions below still line up.
+        wanted("requests") ? api<Request[]>(`/api/solutions/${solutionId}/requests`) : null,
+        wanted("comments") ? api<Comment[]>(`/api/solutions/${solutionId}/comments`) : null,
+        wanted("activity")
+          ? api<ActivityRecord[]>(`/api/solutions/${solutionId}/activity`)
+          : null,
         // Who is using it, not how many. The rows carry project, team, stage and
         // dates; the summary reduced all of that to a count before it was ever shown.
-        api<SolutionUse[]>(`/api/solutions/${solution.id}/use`),
-        api<SolutionIssue[]>(`/api/solutions/${solution.id}/issues`),
-        api<Milestone[]>(`/api/solutions/${solution.id}/milestones`),
+        wanted("use") ? api<SolutionUse[]>(`/api/solutions/${solutionId}/use`) : null,
+        wanted("issues") ? api<SolutionIssue[]>(`/api/solutions/${solutionId}/issues`) : null,
+        wanted("milestones")
+          ? api<Milestone[]>(`/api/solutions/${solutionId}/milestones`)
+          : null,
       ]);
-      if (nextNeeds.status === "fulfilled") setLinkedNeeds(nextNeeds.value);
-      else setError(errorText(nextNeeds.reason));
-      if (nextComments.status === "fulfilled") setSolutionComments(nextComments.value);
-      else setError(errorText(nextComments.reason));
-      if (nextActivity.status === "fulfilled") setSolutionActivity(nextActivity.value);
-      else setError(errorText(nextActivity.reason));
+      if (nextNeeds.status === "fulfilled") {
+        if (nextNeeds.value) setLinkedNeeds(nextNeeds.value);
+      } else setError(errorText(nextNeeds.reason));
+      if (nextComments.status === "fulfilled") {
+        if (nextComments.value) setSolutionComments(nextComments.value);
+      } else setError(errorText(nextComments.reason));
+      if (nextActivity.status === "fulfilled") {
+        if (nextActivity.value) setSolutionActivity(nextActivity.value);
+      } else setError(errorText(nextActivity.reason));
       // Degrades to the counts alone rather than banner-ing the panel.
-      setSolutionAdoptions(nextAdoptions.status === "fulfilled" ? nextAdoptions.value : []);
+      if (wanted("use")) {
+        setSolutionAdoptions(
+          nextAdoptions.status === "fulfilled" ? (nextAdoptions.value ?? []) : [],
+        );
+      }
       /*
        * Rejected maps to `undefined`, NOT `[]`, and deliberately never reaches
        * setError. A host that cannot serve these rejects every time — the REST host
        * 404s and the code app throws "Unsupported route" — and an absent capability
        * is not a failure. This is the same reasoning the insights branch already
        * uses; the tab simply is not offered.
+       *
+       * Guarded on `wanted`, and it must stay guarded: writing `undefined` for a
+       * slice that was never asked for would take the Issues tab away from a reader
+       * who is standing on it.
        */
-      setSolutionIssues(nextIssues.status === "fulfilled" ? nextIssues.value : undefined);
-      setSolutionMilestones(
-        nextMilestones.status === "fulfilled" ? nextMilestones.value : undefined,
-      );
+      if (wanted("issues")) {
+        setSolutionIssues(nextIssues.status === "fulfilled" ? (nextIssues.value ?? undefined) : undefined);
+      }
+      if (wanted("milestones")) {
+        setSolutionMilestones(
+          nextMilestones.status === "fulfilled" ? (nextMilestones.value ?? undefined) : undefined,
+        );
+      }
     } catch (reason) {
       setError(errorText(reason));
     }
+  }
+
+  async function openSolution(
+    solution: Solution,
+    tab: SolutionTab = "overview",
+    loading?: Promise<void>,
+  ) {
+    syncModalUrl("solution", solution.id, tab);
+    // Only one engagement modal at a time.
+    setSelected(null);
+    setSelectedSolution(solution);
+    setSolutionTab(tab);
+    await (loading ?? loadSolutionDetail(solution.id, { fresh: true }));
   }
 
   async function openDiscovery(item: DiscoveryItem) {
@@ -255,14 +369,22 @@ export function App(): React.ReactElement {
         // TODO: open Person profile view
         return;
       }
+      /*
+        The panel's reads are started HERE, alongside the record's own read, rather
+        than after it returns. They only ever needed the id, which is already in
+        hand — waiting for the record first made the whole panel one round trip
+        deeper than it had to be for no gain.
+      */
       const endpoint = item.source === "solution" ? "solutions" : "requests";
       if (item.source === "solution") {
+        const loading = loadSolutionDetail(item.itemId, { fresh: true });
         const solution = await api<Solution>(`/api/${endpoint}/${item.itemId}`);
-        await openSolution(solution);
+        await openSolution(solution, "overview", loading);
         return;
       }
+      const loading = loadRequestDetail(item.itemId);
       const detail = await api<Request>(`/api/${endpoint}/${item.itemId}`);
-      await openRequest(detail);
+      await openRequest(detail, loading);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -438,6 +560,7 @@ export function App(): React.ReactElement {
           comments={requestComments}
           activity={requestActivity}
           linkedSolutions={linkedSolutions}
+          proposedLinks={proposedLinks}
           requestSummary={workspace.state.requestSummary}
           solutionSummary={workspace.state.solutionSummary}
           role={role}
@@ -486,15 +609,19 @@ export function App(): React.ReactElement {
             setSelectedSolution(null);
           }}
           onOpenRequest={openRequest}
-          onRefresh={async () => {
+          onRefresh={async (changed = "solution") => {
             if (!selectedSolution) return;
+            const id = selectedSolution.id;
             try {
-              const refreshed = await api<Solution>(
-                `/api/solutions/${selectedSolution.id}`,
-              );
-              // Refreshing must not throw the reader back to Overview.
-              await openSolution(refreshed, solutionTab);
-              await workspace.load();
+              // The record is re-read only when it can have changed. `setSelectedSolution`
+              // rather than `openSolution`: this is the same solution the reader is
+              // already looking at, and re-opening it would re-sync the URL and take
+              // the panel back through its arrival path for no reason.
+              if (changed === "solution") {
+                setSelectedSolution(await api<Solution>(`/api/solutions/${id}`));
+              }
+              await loadSolutionDetail(id, { only: REFRESHED_BY[changed] });
+              if (CHANGES_THE_LIST.has(changed)) await workspace.load();
             } catch (reason) {
               setError(errorText(reason));
             }

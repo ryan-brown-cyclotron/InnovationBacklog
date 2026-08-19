@@ -54,7 +54,18 @@ export type RequestSolution = {
  * systemuser GUID in the code app. A GUID has no name in it, so the host that can
  * resolve one says so and the rest fall back to deriving it from the key.
  */
-export type SolutionUse = SolutionUseResponse & { startedByName?: string | null };
+/**
+ * `startedByName` and `startedByMe` are added by the adapter, not the wire.
+ *
+ * `startedByMe` is the only way this package can know whose adoption a row is: the id on
+ * the row and `currentUserId` come from two different stores and never match. Optional,
+ * so a host that does not answer it leaves every row read-only rather than editable —
+ * the safe direction for a permission flag.
+ */
+export type SolutionUse = SolutionUseResponse & {
+  startedByName?: string | null;
+  startedByMe?: boolean;
+};
 
 /** Same as the wire, except its attachments may know where they live. */
 export type Comment = Omit<CommentResponse, "attachments"> & {

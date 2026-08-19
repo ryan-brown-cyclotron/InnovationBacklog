@@ -1,4 +1,28 @@
+import type { Role } from "@innovation-backlog/logic";
 import type { ActivityRecord, DiscoveryItem, Request, Solution } from "./types";
+
+/**
+ * The lowercase role string this package passes around, as the domain `Role`.
+ *
+ * Two vocabularies for one idea: components receive `"approver"` (App.tsx lowercases it
+ * and defaults to `"submitter"`), while the rules in `@innovation-backlog/logic` are
+ * keyed on `"Approver"`. Every component that needed a rule has so far re-implemented it
+ * as `role === "approver" || role === "administrator"` — five copies of `canReview` with
+ * nothing keeping them in step.
+ *
+ * Anything unrecognised becomes `"Submitter"`, which is the least-privileged answer and
+ * therefore the safe way to be wrong.
+ */
+export function asRole(role: string): Role {
+  switch (role.trim().toLowerCase()) {
+    case "approver":
+      return "Approver";
+    case "administrator":
+      return "Administrator";
+    default:
+      return "Submitter";
+  }
+}
 
 /**
  * A DiscoveryItem when all we know is which item was clicked. Openers fetch the
@@ -225,6 +249,10 @@ export function activityPhrase(action: string, context?: string): string {
         : "updated how their team uses a solution";
     case "solutionUse.completed":
       return team ? `finished a rollout for the ${team} team` : "finished a rollout";
+    // "stopped using", not "removed an adoption": the row is a tombstone, and the fact
+    // worth reporting is that a team stopped, not that a record changed shape.
+    case "solutionUse.withdrawn":
+      return team ? `stopped using a solution for the ${team} team` : "stopped using a solution";
     case "contribution.created":
       return "asked to help";
     case "contribution.accepted":
@@ -274,6 +302,7 @@ export function activitySuffixForItem(action: string, context?: string): string 
     case "solutionUse.statusChanged":
       return ` on behalf of the ${team} team`;
     case "solutionUse.completed":
+    case "solutionUse.withdrawn":
       return ` for the ${team} team`;
     default:
       return "";
@@ -321,6 +350,8 @@ export function activityVerbForItem(action: string): string {
       return "updated their team's use of";
     case "solutionUse.completed":
       return "finished rolling out";
+    case "solutionUse.withdrawn":
+      return "stopped using";
     case "contribution.created":
       return "asked to help with";
     case "contribution.accepted":

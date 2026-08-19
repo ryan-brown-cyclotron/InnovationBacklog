@@ -274,6 +274,16 @@ function activityText(record: ActivityRecord): string {
         ? `${actor} finished rolling this out for the ${team} team`
         : `${actor} finished rolling this out`;
     }
+    /*
+      The adoption row is gone from the tab and from the count by the time anyone reads
+      this, so this line is the whole record of why the number moved.
+    */
+    case "solutionUse.withdrawn": {
+      const team = adoptingTeam(record.summary);
+      return team
+        ? `${actor} stopped using this for the ${team} team`
+        : `${actor} stopped using this`;
+    }
     default:
       // Audit summaries are written for the record, not the reader, so the
       // shared phrase table is the fallback rather than raw summary text.

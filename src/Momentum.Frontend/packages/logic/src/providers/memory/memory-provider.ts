@@ -12,6 +12,7 @@ import type {
   Adoption,
   HubItemRef,
   IdeaSolutionLink,
+  PendingLink,
   Participation,
   RequestParticipationInput,
   StartAdoptionInput,
@@ -21,7 +22,9 @@ import type {
 import { targetKey } from "../../domain/engagement.js";
 import type { ItemVisibility, Role } from "../../domain/enums.js";
 import {
+  canEditIdea,
   canEditSolution,
+  canManageAdoption,
   canReview,
   canSee,
   canSetIssueStatus,
@@ -52,7 +55,7 @@ import { normalizeTags } from "../../domain/tags.js";
 import type { ApprovalInbox, Decision } from "../../contracts/approvals-provider.js";
 import type { InnovationBacklogProvider } from "../../contracts/provider.js";
 import { AppError } from "../../errors/errors.js";
-import type { MemorySeed, MemoryVote } from "./seed.js";
+import type { AdoptionRow, MemorySeed, MemoryVote } from "./seed.js";
 import { defaultSeed } from "./seed.js";
 
 export interface MemoryProviderOptions {
@@ -131,6 +134,101 @@ export function createMemoryProvider(
     if (!canReview(role)) {
       throw new AppError("Approver role required", { category: "permission" });
     }
+  };
+
+  /**
+   * Undecided proposals with both titles, optionally for one idea.
+   *
+   * A proposal whose idea or solution is invisible to this caller is dropped rather than
+   * rendered blank — the real adapter does the same when hydration omits an item.
+   */
+  const pendingLinks = (ideaId?: string): PendingLink[] =>
+    store.links.flatMap((link) => {
+      if (link.approval !== "Pending") return [];
+      if (ideaId !== undefined && link.ideaId !== ideaId) return [];
+      const idea = findIdea(link.ideaId);
+      const solution = findSolution(link.solutionId);
+      if (!idea || !solution) return [];
+      return [
+        {
+          ideaId: link.ideaId,
+          ideaTitle: idea.title,
+          solutionId: link.solutionId,
+          solutionTitle: solution.title,
+          addedBy: link.addedBy,
+          addedAt: link.addedAt,
+        },
+      ];
+    });
+
+  /**
+   * Record a reviewer's decision on a proposed link.
+   *
+   * Shared by approve and reject because the only difference is the state written —
+   * both require the role, both require a rationale, and both must refuse a pair that
+   * has already been decided. That last one is the rule worth having in one place: a
+   * second approval would re-stamp the decider and the date over somebody else's
+   * decision.
+   */
+  const decideLink = (
+    ideaId: string,
+    solutionId: string,
+    approval: "Approved" | "Rejected",
+    rationale: string,
+  ): IdeaSolutionLink => {
+    requireReviewer();
+    if (!rationale.trim()) {
+      throw new AppError("A rationale is required", { category: "validation" });
+    }
+
+    const link = store.links.find((l) => l.ideaId === ideaId && l.solutionId === solutionId);
+    if (!link || link.approval !== "Pending") {
+      throw new AppError(`Link ${ideaId}->${solutionId} is not waiting for a decision`, {
+        category: "notFound",
+      });
+    }
+
+    link.approval = approval;
+    link.rationale = rationale;
+    link.decidedBy = me;
+    link.decidedAt = now();
+    return link;
+  };
+
+  /**
+   * The store row with `startedByMe` answered for THIS caller.
+   *
+   * The flag is derived here rather than held on the row — see `AdoptionRow` in seed.ts.
+   * Every path that hands an adoption out goes through this, so no surface can show a
+   * control based on a flag the store made up.
+   */
+  const asAdoption = (row: AdoptionRow): Adoption => ({
+    ...row,
+    startedByMe: sameUser(row.startedBy, me),
+  });
+
+  /**
+   * The adoption, if the caller may manage it: the person who recorded it, or a
+   * reviewer. Notably NOT the solution's owner — see `canManageAdoption`.
+   *
+   * Ordered like `requireRoadmapEditor`: an invisible solution reports "not found"
+   * before a permission error could confirm the adoption exists.
+   */
+  const requireAdoptionManager = (solutionId: string, adoptionId: string): AdoptionRow => {
+    requireSolution(solutionId);
+    const existing = store.adoptions.find(
+      (a) => a.id === adoptionId && a.solutionId === solutionId,
+    );
+    if (!existing) {
+      throw new AppError(`Adoption ${adoptionId} not found`, { category: "notFound" });
+    }
+    if (!canManageAdoption(role, sameUser(existing.startedBy, me))) {
+      throw new AppError(
+        "Only the person who recorded this adoption, or a reviewer, can change it",
+        { category: "permission" },
+      );
+    }
+    return existing;
   };
 
   /**
@@ -297,6 +395,13 @@ export function createMemoryProvider(
 
       async updateIdea(id: string, patch: UpdateIdeaInput): Promise<Idea> {
         const existing = requireIdea(id);
+        // Its author, or a reviewer — matching `requireIdeaEditor` in the ADO adapter,
+        // which is the check this provider had no equivalent of.
+        if (!canEditIdea(role, sameUser(existing.submittedBy, me))) {
+          throw new AppError("Only the author or a reviewer can edit this idea", {
+            category: "permission",
+          });
+        }
         if (patch.title !== undefined) existing.title = patch.title;
         if (patch.description !== undefined) existing.description = patch.description;
         if (patch.tags !== undefined) existing.tags = normalizeTags(patch.tags);
@@ -444,7 +549,11 @@ export function createMemoryProvider(
         const map: RollupMap<SolutionRollup> = {};
 
         for (const item of rows) {
-          const uses = store.adoptions.filter((a) => a.solutionId === item.id);
+          // Withdrawn rows count in nothing, matching `adoptionFacts` in the real
+          // adapter — otherwise the tab header would disagree with its own rows.
+          const uses = store.adoptions.filter(
+            (a) => a.solutionId === item.id && a.status !== "Withdrawn",
+          );
           const cast = votesFor(`solution:${item.id}`);
           const teams = new Set(uses.map((u) => u.team ?? u.projectName));
 
@@ -621,14 +730,22 @@ export function createMemoryProvider(
         return settle(voteSummaryFor(target));
       },
 
+      /** Withdrawn rows are tombstones, filtered out exactly as the real store does. */
       async listAdoptions(solutionId: string): Promise<Adoption[]> {
         requireSolution(solutionId);
-        return settle(clone(store.adoptions.filter((a) => a.solutionId === solutionId)));
+        return settle(
+          clone(
+            store.adoptions
+              .filter((a) => a.solutionId === solutionId && a.status !== "Withdrawn")
+              .map(asAdoption),
+          ),
+        );
       },
 
+      /** Open, like `createIssue` — see the note on the Dataverse provider. */
       async startAdoption(solutionId: string, input: StartAdoptionInput): Promise<Adoption> {
         requireSolution(solutionId);
-        const created: Adoption = {
+        const created: AdoptionRow = {
           id: nextId("a"),
           solutionId,
           startedBy: me,
@@ -640,7 +757,7 @@ export function createMemoryProvider(
           completedAt: null,
         };
         store.adoptions.push(created);
-        return settle(clone(created));
+        return settle(clone(asAdoption(created)));
       },
 
       async updateAdoption(
@@ -648,28 +765,31 @@ export function createMemoryProvider(
         adoptionId: string,
         patch: UpdateAdoptionInput,
       ): Promise<Adoption> {
-        const existing = store.adoptions.find(
-          (a) => a.id === adoptionId && a.solutionId === solutionId,
-        );
-        if (!existing) throw new AppError(`Adoption ${adoptionId} not found`, { category: "notFound" });
+        const existing = requireAdoptionManager(solutionId, adoptionId);
 
         if (patch.status !== undefined) existing.status = patch.status;
         if (patch.projectName !== undefined) existing.projectName = patch.projectName;
         if (patch.team !== undefined) existing.team = patch.team;
         existing.updatedAt = now();
-        return settle(clone(existing));
+        return settle(clone(asAdoption(existing)));
       },
 
       async completeAdoption(solutionId: string, adoptionId: string): Promise<Adoption> {
-        const existing = store.adoptions.find(
-          (a) => a.id === adoptionId && a.solutionId === solutionId,
-        );
-        if (!existing) throw new AppError(`Adoption ${adoptionId} not found`, { category: "notFound" });
+        const existing = requireAdoptionManager(solutionId, adoptionId);
 
         existing.status = "Using";
         existing.completedAt = now();
         existing.updatedAt = now();
-        return settle(clone(existing));
+        return settle(clone(asAdoption(existing)));
+      },
+
+      /** Status only. `completedAt` stays null — see the contract. */
+      async withdrawAdoption(solutionId: string, adoptionId: string): Promise<Adoption> {
+        const existing = requireAdoptionManager(solutionId, adoptionId);
+
+        existing.status = "Withdrawn";
+        existing.updatedAt = now();
+        return settle(clone(asAdoption(existing)));
       },
 
       async requestParticipation(input: RequestParticipationInput): Promise<Participation> {
@@ -794,23 +914,73 @@ export function createMemoryProvider(
         return settle(decisions.filter((d) => d.subjectId === ideaId).map(clone));
       },
 
+      /** Open: seeing both items is the gate. See `linkSolution` in the ADO adapter. */
+      /**
+       * PROPOSES it. Open to anyone who can see both items, and Pending until reviewed.
+       *
+       * The real adapter writes nothing to Azure DevOps here; this store has no second
+       * half to stay out of, so what it models instead is the state — a link that exists
+       * but is not yet true.
+       */
       async linkSolution(ideaId: string, solutionId: string): Promise<IdeaSolutionLink> {
-        requireReviewer();
         requireIdea(ideaId);
         requireSolution(solutionId);
 
+        // Idempotent, including for a rejected pair: proposing again must not quietly
+        // reopen a decision somebody already made.
         const existing = store.links.find(
           (l) => l.ideaId === ideaId && l.solutionId === solutionId,
         );
         if (existing) return settle(clone(existing));
 
-        const created: IdeaSolutionLink = { ideaId, solutionId, addedBy: me, addedAt: now() };
+        const created: IdeaSolutionLink = {
+          ideaId,
+          solutionId,
+          addedBy: me,
+          addedAt: now(),
+          approval: "Pending",
+          decidedBy: null,
+          rationale: null,
+          decidedAt: null,
+        };
         store.links.push(created);
         return settle(clone(created));
       },
 
+      async listPendingLinks(): Promise<PendingLink[]> {
+        if (!canReview(role)) return settle([]);
+        return settle(pendingLinks());
+      },
+
+      /** One idea's proposals, open to anyone who can see it. */
+      async listProposedLinks(ideaId: string): Promise<PendingLink[]> {
+        requireIdea(ideaId);
+        return settle(pendingLinks(ideaId));
+      },
+
+      async approveLink(ideaId, solutionId, rationale): Promise<IdeaSolutionLink> {
+        return settle(clone(decideLink(ideaId, solutionId, "Approved", rationale)));
+      },
+
+      async rejectLink(ideaId, solutionId, rationale): Promise<IdeaSolutionLink> {
+        return settle(clone(decideLink(ideaId, solutionId, "Rejected", rationale)));
+      },
+
+      /**
+       * Removes an APPROVED link. The solution's owner or a reviewer, keyed on the
+       * SOLUTION because the link is a claim about what that solution answers.
+       *
+       * The row goes entirely rather than reverting to Pending: an unlink is not a
+       * proposal, and putting it back in the queue would ask a reviewer to approve
+       * something nobody had asked for. The pair can be proposed again afterwards.
+       */
       async unlinkSolution(ideaId: string, solutionId: string): Promise<void> {
-        requireReviewer();
+        const solution = requireSolution(solutionId);
+        if (!canEditSolution(role, sameUser(solution.ownerId, me))) {
+          throw new AppError("Only the owner or a reviewer can remove a link", {
+            category: "permission",
+          });
+        }
         const index = store.links.findIndex(
           (l) => l.ideaId === ideaId && l.solutionId === solutionId,
         );

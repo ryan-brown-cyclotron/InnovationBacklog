@@ -1,9 +1,9 @@
 {
   "version": "1.0",
-  "appId": "3f08535d-5e42-4cd8-b9ba-59c462853efa",
+  "appId": "b7a57e7a-b9b4-4106-88d9-91a59395a732",
   "appDisplayName": "Innovation Backlog",
   "region": "prod",
-  "environmentId": "b850a67f-670b-ea79-a46d-6837cb314714",
+  "environmentId": "efc1b265-24f6-eef2-9150-82658130400a",
   "description": "Ideas, reusable solutions, and the delivery work they become.",
   "buildPath": "dist",
   "buildEntryPoint": "index.html",
@@ -66,6 +66,10 @@
         "environmentvariablevalues": {
           "entitySetName": "environmentvariablevalues",
           "logicalName": "environmentvariablevalue"
+        },
+        "links": {
+          "entitySetName": "cycai_links",
+          "logicalName": "cycai_link"
         }
       },
       "environmentVariableName": ""

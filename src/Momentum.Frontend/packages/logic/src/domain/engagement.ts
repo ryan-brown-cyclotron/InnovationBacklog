@@ -1,6 +1,11 @@
 import type { SolutionUseResponse, VoteSummaryResponse } from "@momentum/contracts";
 import type { Assert, FieldsExistOn, FieldsExistOnExcept } from "./common.js";
-import type { AdoptionStatus, HubItemType, ParticipationStatus } from "./enums.js";
+import type {
+  AdoptionStatus,
+  ApprovalState,
+  HubItemType,
+  ParticipationStatus,
+} from "./enums.js";
 
 /** Points an engagement record at either side of the hub. */
 export interface HubItemRef {
@@ -57,6 +62,21 @@ export interface Adoption {
    * identity (the .NET side stores a UserId) omit it and callers fall back.
    */
   startedByName?: string | null;
+  /**
+   * Whether the calling user recorded this adoption.
+   *
+   * Resolved by the provider, not derived by the caller — and that is the whole point.
+   * `startedBy` is whatever the store keys on, which for Dataverse is a systemuser
+   * GUID, while `CurrentUser.id` is an Azure DevOps UPN. Those two id spaces cannot be
+   * joined client-side (see the standing decision in CHECKPOINT.md), so a UI comparing
+   * them gets `false` for the real adopter every time. The provider holds both ids in
+   * the same space and answers the question there.
+   *
+   * Same arrangement, and for the same reason, as `VoteSummary.votedByMe`: a control
+   * whose availability depends on per-user state cannot be rendered without it.
+   * `canManageAdoption` takes this flag directly.
+   */
+  startedByMe: boolean;
   projectName: string;
   team: string | null;
   status: AdoptionStatus;
@@ -65,10 +85,10 @@ export interface Adoption {
   completedAt: string | null;
 }
 
-// startedByName is resolved by the adapter and has no wire counterpart; every other
-// field still has to exist on the generated DTO.
+// startedByName and startedByMe are resolved by the adapter and have no wire
+// counterpart; every other field still has to exist on the generated DTO.
 export type AdoptionMatchesWire = Assert<
-  FieldsExistOnExcept<Adoption, SolutionUseResponse, "startedByName">
+  FieldsExistOnExcept<Adoption, SolutionUseResponse, "startedByName" | "startedByMe">
 >;
 
 export interface StartAdoptionInput {
@@ -121,18 +141,55 @@ export interface RequestParticipationInput {
 // ---------------------------------------------------------------------------
 
 /**
- * A claim that a solution answers an idea.
+ * A claim that a solution answers an idea, and the decision on it.
  *
- * Deliberately attribute-free. An earlier model gave a link a relationship taxonomy
- * (Proposed / Relevant / Existing) and its own approval state, both of which existed
- * only because anyone could propose one. Linking is now a reviewer action, so there
- * is no pending state and nothing left to classify — which means the link is a plain
- * Azure DevOps `Related` link rather than a row in a side table, and it shows up in
- * the work item link panel and in WIQL for free.
+ * **Three things need approval: ideas, solutions, and the links between them.** This
+ * carried no approval state for a while, on the reasoning that linking was a reviewer
+ * action so nothing could ever be pending. Linking is open now — seeing both items is
+ * the gate — so the pending state is back, and with it the reason for a row.
+ *
+ * Where each half lives, which is the whole design:
+ *
+ * - **Dataverse holds the proposal.** Pending, Approved or Rejected, with who proposed
+ *   it, who decided and why.
+ * - **Azure DevOps holds approved truth only.** The `Related` link is created at the
+ *   moment of approval and never before.
+ *
+ * So a pending link is invisible in ADO, deliberately. That is what lets every reader
+ * of ADO relations — the work item link panel, WIQL, `listLinkedSolutions` — be right
+ * with no approval filter to remember. The cost is that the app must show a proposal
+ * itself, or proposing one looks like it did nothing.
+ *
+ * The relationship taxonomy (Proposed / Relevant / Existing) is NOT coming back. It
+ * described what kind of answer a solution was and nobody ever acted on it; approval
+ * asks whether the claim is true at all, which is the question that was actually being
+ * avoided.
  */
 export interface IdeaSolutionLink {
   ideaId: string;
   solutionId: string;
+  /** Who proposed it. Named `addedBy` since before there was anything to decide. */
+  addedBy: string;
+  addedAt: string;
+  approval: ApprovalState;
+  decidedBy: string | null;
+  rationale: string | null;
+  decidedAt: string | null;
+}
+
+/**
+ * A proposed link waiting on a reviewer, carrying both titles.
+ *
+ * The titles are the reason this is its own type rather than an `IdeaSolutionLink`.
+ * The review queue renders "<solution> answers <idea>" and a reviewer cannot decide on
+ * two work item ids — so the provider resolves both while it has the rows in hand,
+ * rather than making the queue fetch each one.
+ */
+export interface PendingLink {
+  ideaId: string;
+  ideaTitle: string;
+  solutionId: string;
+  solutionTitle: string;
   addedBy: string;
   addedAt: string;
 }

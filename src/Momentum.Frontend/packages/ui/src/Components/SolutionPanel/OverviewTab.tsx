@@ -86,6 +86,8 @@ export function OverviewTab({
           searchLabel="Search ideas to connect…"
           noResultsText="No ideas found."
           removeVerb="Disconnect"
+          // Connecting is open; disconnecting is the owner's or a reviewer's.
+          canUnlink={canEdit}
           items={linkedNeeds.map((need) => ({
             id: need.id,
             title: need.title,

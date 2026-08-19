@@ -52,6 +52,7 @@ const ACTION = {
   adoptionStarted: "solutionUse.started",
   adoptionUpdated: "solutionUse.updated",
   adoptionCompleted: "solutionUse.completed",
+  adoptionWithdrawn: "solutionUse.withdrawn",
   solutionLinked: "request.solutionLinked",
   solutionUnlinked: "request.solutionUnlinked",
   canonicalSelected: "request.canonicalSelected",
@@ -190,6 +191,16 @@ export function withActivity(
       async completeAdoption(solutionId, adoptionId) {
         const result = await engagement.completeAdoption(solutionId, adoptionId);
         note(ACTION.adoptionCompleted, "Solution", solutionId, teamOf(result.team));
+        return result;
+      },
+      /*
+        The activity row is the ONLY trace a withdrawal leaves on the surface. The
+        adoption itself disappears from `listAdoptions` and from every count, so without
+        this entry a solution's adoption number would drop with nothing to explain it.
+      */
+      async withdrawAdoption(solutionId, adoptionId) {
+        const result = await engagement.withdrawAdoption(solutionId, adoptionId);
+        note(ACTION.adoptionWithdrawn, "Solution", solutionId, teamOf(result.team));
         return result;
       },
     },

@@ -1,5 +1,6 @@
 import {
   AppError,
+  canEditIdea,
   canEditSolution,
   canReview,
   canSetIssueStatus,
@@ -19,6 +20,7 @@ import type {
   IdeasProvider,
   ItemVisibility,
   PageResult,
+  PendingLink,
   Role,
   SearchItem,
   SearchQuery,
@@ -32,6 +34,7 @@ import type {
 import { unwrap } from "../errors.js";
 import type { AdoClient } from "./client.js";
 import { addField } from "./client.js";
+import type { LinkStore } from "../dataverse/links.js";
 import type { RollupReader } from "../dataverse/rollups.js";
 import {
   FIELDS,
@@ -48,18 +51,18 @@ import {
   encodeTags,
   getWorkItem,
   parentClause,
-  queryWorkItems,
   readTags,
   relatedItems,
-  stateReachedAt,
   toIdea,
   toMilestone,
   toSolution,
   toSolutionIssue,
+  updatedValue,
   withTag,
   wiqlString,
+  workItemUpdates,
 } from "./workitems.js";
-import type { WorkItem } from "./workitems.js";
+import type { WorkItem, WorkItemLoader } from "./workitems.js";
 
 /**
  * Ideas, solutions, approvals and search, over Azure DevOps work items.
@@ -73,6 +76,12 @@ import type { WorkItem } from "./workitems.js";
 
 export interface ItemsOptions {
   client: AdoClient;
+  /**
+   * The two-hop reader. Shared rather than built per provider: coalescing only works
+   * across call sites that use the same loader, and the whole point is that ideas,
+   * issues and milestones are hydrated by code that knows nothing about each other.
+   */
+  loader: WorkItemLoader;
   rollups: RollupReader;
   role: () => Promise<Role>;
   /**
@@ -195,7 +204,29 @@ async function readOrNull<T>(read: () => Promise<T>): Promise<T | null> {
 // ---------------------------------------------------------------------------
 
 export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
-  const { client, rollups, role } = options;
+  const { client, loader, rollups, role, currentUserId } = options;
+
+  /**
+   * The author, or a reviewer.
+   *
+   * The solution side has had `requireSolutionEditor` all along and the idea side had
+   * nothing, so anyone who could see an idea could rewrite it. That mattered more here
+   * than the asymmetry suggests: `updateIdea` writes System.Tags, and on an Idea the
+   * `pipeline:` tag is what `withPipeline` reads to derive the STATUS.
+   *
+   * Same caveat as its sibling: not a security boundary. Azure DevOps lets any
+   * contributor patch any work item in an area they can write to, and a process rule
+   * cannot express "the person named in System.CreatedBy". This gates the affordance's
+   * server-side twin, and nothing more.
+   */
+  async function requireIdeaEditor(idea: WorkItem): Promise<void> {
+    const me = await currentUserId();
+    if (!canEditIdea(await role(), sameUser(identityOf(idea, FIELDS.createdBy), me))) {
+      throw new AppError("Only the author or a reviewer can edit this idea.", {
+        category: "permission",
+      });
+    }
+  }
 
   async function fetchIdeas(query?: IdeaQuery): Promise<Idea[]> {
     const wiql =
@@ -210,7 +241,7 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
         : "") +
       orderClause(query?.sort?.field, query?.sort?.descending);
 
-    return (await queryWorkItems(client, wiql, LIST_FIELDS)).map(toIdea);
+    return (await loader.list(wiql, LIST_FIELDS)).map(toIdea);
   }
 
   return {
@@ -254,6 +285,16 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
     },
 
     async updateIdea(id, patch: UpdateIdeaInput) {
+      /*
+        Read once, then check, before anything is built or written. The tags branch
+        below needs this same item for its read-modify-write, so the permission check
+        adds no round trip on that path — and the read cache in ado/client.ts would
+        have covered it anyway. It has to precede the patch either way: `patch` flushes
+        that cache.
+      */
+      const current = await getWorkItem(client, id, "read idea for update");
+      await requireIdeaEditor(current);
+
       const operations: ReturnType<typeof addField>[] = [];
       if (patch.title !== undefined) operations.push(addField(FIELDS.title, patch.title));
       if (patch.description !== undefined) {
@@ -269,7 +310,6 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
           to System.Tags would not just lose a label, it would reset the idea's
           pipeline stage every time somebody edited a tag.
         */
-        const current = await getWorkItem(client, id, "read idea for update");
         const namespaced = readTags(current.fields).filter((tag) =>
           Object.values(TAG).some((prefix) =>
             tag.toLowerCase().startsWith(prefix.toLowerCase()),
@@ -280,9 +320,8 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
         );
       }
 
-      if (operations.length === 0) {
-        return toIdea(await getWorkItem(client, id, "read idea"));
-      }
+      // Nothing to write, and the item is already in hand from the check above.
+      if (operations.length === 0) return toIdea(current);
 
       const updated = await client.patch<WorkItem>(
         `_apis/wit/workitems/${encodeURIComponent(id)}`,
@@ -297,12 +336,7 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
       const ids = item ? relatedItems(item).ids : [];
       if (ids.length === 0) return [];
 
-      const batch = await client.post<{ value?: WorkItem[] }>(
-        "_apis/wit/workitemsbatch",
-        { ids: ids.map(Number), fields: [...LIST_FIELDS] },
-        "hydrate linked solutions",
-      );
-      return (batch.value ?? [])
+      return (await loader.hydrate(ids.map(Number), LIST_FIELDS))
         .filter((w) => w.fields[FIELDS.workItemType] === WIT.solution)
         .map(toSolution);
     },
@@ -336,7 +370,7 @@ export function createIdeasProvider(options: ItemsOptions): IdeasProvider {
 // ---------------------------------------------------------------------------
 
 export function createSolutionsProvider(options: ItemsOptions): SolutionsProvider {
-  const { client, rollups, role, currentUserId } = options;
+  const { client, loader, rollups, role, currentUserId } = options;
 
   async function fetchSolutions(query?: SolutionQuery): Promise<Solution[]> {
     // Now a real field, so kind filters are an equality clause rather than a
@@ -356,7 +390,7 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
       kindClause +
       orderClause(query?.sort?.field, query?.sort?.descending);
 
-    return (await queryWorkItems(client, wiql, LIST_FIELDS)).map(toSolution);
+    return (await loader.list(wiql, LIST_FIELDS)).map(toSolution);
   }
 
   return {
@@ -365,19 +399,22 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
     },
 
     /**
-     * The detail read is where `publishedAt` becomes knowable: it is the revision
-     * on which State first became Published, so it costs one extra call and is
-     * only paid here rather than on every row of a list.
+     * One call, and `publishedAt` stays null — the same as every list read returns.
+     *
+     * It used to be two. The second read walked the work item's revisions to find
+     * where State first became Published, and it sat ALONE in its own wave in front
+     * of the panel: 1557ms and 16KB of whole-revision snapshots, measured, to produce
+     * one date. Nothing renders that date — `publishedAt` appears in the domain type,
+     * the memory provider and the generated contract, and in no component — so the
+     * panel waited a second and a half for a field it then ignored.
+     *
+     * If a surface ever needs it, `workItemUpdates` is the cheap way to get it (field
+     * deltas rather than snapshots) and it belongs behind its own lazy read, not in
+     * front of the panel.
      */
     async getSolution(id) {
       const item = await readOrNull(() => getWorkItem(client, id, "get solution"));
-      if (!item) return null;
-
-      const solution = toSolution(item);
-      if (solution.status === "Published" || solution.status === "Retired") {
-        solution.publishedAt = await stateReachedAt(client, id, "Published").catch(() => null);
-      }
-      return solution;
+      return item ? toSolution(item) : null;
     },
 
     async createSolution(input: CreateSolutionInput) {
@@ -408,12 +445,7 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
       const ids = item ? relatedItems(item).ids : [];
       if (ids.length === 0) return [];
 
-      const batch = await client.post<{ value?: WorkItem[] }>(
-        "_apis/wit/workitemsbatch",
-        { ids: ids.map(Number), fields: [...LIST_FIELDS] },
-        "hydrate linked ideas",
-      );
-      return (batch.value ?? [])
+      return (await loader.hydrate(ids.map(Number), LIST_FIELDS))
         .filter((w) => w.fields[FIELDS.workItemType] === WIT.idea)
         .map(toIdea);
     },
@@ -475,18 +507,15 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
     // -----------------------------------------------------------------------
     issues: {
       async listIssues(solutionId) {
-        const clause = parentClause(solutionId);
-        if (!clause) return [];
-
-        const items = await queryWorkItems(
-          client,
-          `SELECT [${FIELDS.id}] FROM WorkItems` +
-            ` WHERE [${FIELDS.workItemType}] = '${wiqlString(WIT.issue)}'` +
-            ` AND ${clause}` +
-            ` ORDER BY [${FIELDS.createdDate}] DESC`,
-          ISSUE_FIELDS,
+        const items = await children(solutionId, WIT.issue, ISSUE_FIELDS);
+        return (
+          items
+            .map((item) => toSolutionIssue(item, solutionId))
+            // Was `ORDER BY [System.CreatedDate] DESC` in the query. The merged
+            // child query cannot order for two types at once, so the sort moved
+            // here — which is where milestones have always done theirs.
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
-        return items.map((item) => toSolutionIssue(item, solutionId));
       },
 
       async createIssue(solutionId, input) {
@@ -562,21 +591,10 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
     // -----------------------------------------------------------------------
     roadmap: {
       async listMilestones(solutionId) {
-        const clause = parentClause(solutionId);
-        if (!clause) return [];
-
-        const items = await queryWorkItems(
-          client,
-          `SELECT [${FIELDS.id}] FROM WorkItems` +
-            ` WHERE [${FIELDS.workItemType}] = '${wiqlString(WIT.milestone)}'` +
-            ` AND ${clause}` +
-            // Cancelled is the tombstone deleteMilestone writes, so it never renders.
-            ` AND [${FIELDS.state}] <> '${wiqlString(MILESTONE_STATE.Cancelled)}'` +
-            ` ORDER BY [${FIELDS.targetDate}] ASC`,
-          MILESTONE_FIELDS,
-        );
+        const items = await children(solutionId, WIT.milestone, MILESTONE_FIELDS);
         // WIQL leaves null ordering unspecified, so undated milestones are placed
-        // here rather than wherever the server happened to put them.
+        // here rather than wherever the server happened to put them. This sort
+        // predates the merged query and is why merging costs nothing.
         return items.map((item) => toMilestone(item, solutionId)).sort(compareMilestones);
       },
 
@@ -661,24 +679,74 @@ export function createSolutionsProvider(options: ItemsOptions): SolutionsProvide
     },
   };
 
-  /** The owner as the panel sees it: assignee, else whoever shared it. */
-  function ownerOf(solution: WorkItem): string {
-    return identityOf(solution, FIELDS.assignedTo) || identityOf(solution, FIELDS.createdBy);
+  /**
+   * The solution's children of one type, from a query that fetches them all.
+   *
+   * Issues and milestones used to be two WIQL queries that differed only by work
+   * item type, and the panel asks for both at once — two round trips for one
+   * `[System.Parent]` scan. This builds ONE query text, byte for byte, whichever
+   * list asks for it, so the client's read cache collapses the pair into a single
+   * request and the loader merges the two hydrations that follow it.
+   *
+   * The type filter therefore moves to the rows. Ordering moves to the caller: a
+   * query serving two types cannot order for both, and both already re-sorted
+   * client-side anyway.
+   */
+  async function children(
+    solutionId: string,
+    type: string,
+    fields: readonly string[],
+  ): Promise<WorkItem[]> {
+    const clause = parentClause(solutionId);
+    if (!clause) return [];
+
+    const items = await loader.list(
+      `SELECT [${FIELDS.id}] FROM WorkItems` +
+        ` WHERE ${clause}` +
+        ` AND [${FIELDS.workItemType}] IN ` +
+        `('${wiqlString(WIT.issue)}', '${wiqlString(WIT.milestone)}')` +
+        // Cancelled is the tombstone deleteMilestone writes, so it never renders.
+        // Safe to apply to both types rather than to milestones alone: Issue
+        // inherits Basic's To Do / Doing / Done and has no Cancelled state, so the
+        // clause cannot hide one.
+        ` AND [${FIELDS.state}] <> '${wiqlString(MILESTONE_STATE.Cancelled)}'`,
+      fields,
+    );
+    return items.filter((item) => item.fields[FIELDS.workItemType] === type);
   }
 
-  async function requireSolutionEditor(solution: WorkItem): Promise<void> {
-    const me = await currentUserId();
-    if (!canEditSolution(await role(), sameUser(ownerOf(solution), me))) {
-      throw new AppError("Only the owner or a reviewer can edit this solution.", {
-        category: "permission",
-      });
-    }
-  }
+  const requireSolutionEditor = (solution: WorkItem) =>
+    assertSolutionEditor(solution, role, currentUserId);
 
   async function requireRoadmapEditor(solutionId: string): Promise<void> {
     await requireSolutionEditor(
       await getWorkItem(client, solutionId, "read solution for roadmap"),
     );
+  }
+}
+
+/** The owner as the panel sees it: assignee, else whoever shared it. */
+function ownerOf(solution: WorkItem): string {
+  return identityOf(solution, FIELDS.assignedTo) || identityOf(solution, FIELDS.createdBy);
+}
+
+/**
+ * The owner, or a reviewer.
+ *
+ * Module-level rather than nested in `createSolutionsProvider` because the approvals
+ * provider needs the same rule for `unlinkSolution` — a link hangs off a solution, and
+ * who may take one away is the same question as who may edit it.
+ */
+async function assertSolutionEditor(
+  solution: WorkItem,
+  role: () => Promise<Role>,
+  currentUserId: () => Promise<string | null>,
+): Promise<void> {
+  const me = await currentUserId();
+  if (!canEditSolution(await role(), sameUser(ownerOf(solution), me))) {
+    throw new AppError("Only the owner or a reviewer can edit this solution.", {
+      category: "permission",
+    });
   }
 }
 
@@ -696,8 +764,56 @@ function identityOf(item: WorkItem, field: string): string {
 
 // ---------------------------------------------------------------------------
 
-export function createApprovalsProvider(options: ItemsOptions): ApprovalsProvider {
-  const { client, role } = options;
+/**
+ * Approvals, over Azure DevOps — plus the Dataverse link store, because a link's
+ * proposal lives there and its approved form lives here. This provider is the only place
+ * that knows both, which is what keeps `links.ts` free of work items and the ADO readers
+ * free of approval state.
+ */
+export function createApprovalsProvider(
+  options: ItemsOptions & { links: LinkStore },
+): ApprovalsProvider {
+  const { client, loader, role, currentUserId, links } = options;
+
+  /**
+   * Proposals with both work item titles resolved.
+   *
+   * One hydration over the union of both sides' ids, not two calls per row: nobody can
+   * act on a pair of work item ids, so the titles are the point of the read rather than
+   * decoration on it.
+   *
+   * A proposal whose idea or solution cannot be read is DROPPED rather than rendered
+   * with a blank title. `hydrate` sends `errorPolicy: "omit"`, so an item that was
+   * deleted or is invisible to this caller simply does not come back — and a row reading
+   * "answers " with nothing after it is worse than one row fewer.
+   */
+  async function withTitles(pending: IdeaSolutionLink[]): Promise<PendingLink[]> {
+    if (pending.length === 0) return [];
+
+    const ids = [...new Set(pending.flatMap((link) => [link.ideaId, link.solutionId]))];
+    const titles = new Map(
+      (await loader.hydrate(ids.map(Number), LIST_FIELDS)).map((item) => [
+        String(item.id),
+        String(item.fields[FIELDS.title] ?? ""),
+      ]),
+    );
+
+    return pending.flatMap((link) => {
+      const ideaTitle = titles.get(link.ideaId);
+      const solutionTitle = titles.get(link.solutionId);
+      if (!ideaTitle || !solutionTitle) return [];
+      return [
+        {
+          ideaId: link.ideaId,
+          ideaTitle,
+          solutionId: link.solutionId,
+          solutionTitle,
+          addedBy: link.addedBy,
+          addedAt: link.addedAt,
+        },
+      ];
+    });
+  }
 
   async function transition(id: string, state: string, rationale: string, what: string) {
     await requireReviewer(role);
@@ -753,8 +869,8 @@ export function createApprovalsProvider(options: ItemsOptions): ApprovalsProvide
         ` ORDER BY [${FIELDS.createdDate}] ASC`;
 
       const [ideas, solutions] = await Promise.all([
-        queryWorkItems(client, awaiting(WIT.idea), LIST_FIELDS),
-        queryWorkItems(client, awaiting(WIT.solution), LIST_FIELDS),
+        loader.list(awaiting(WIT.idea), LIST_FIELDS),
+        loader.list(awaiting(WIT.solution), LIST_FIELDS),
       ]);
 
       return { ideas: ideas.map(toIdea), solutions: solutions.map(toSolution) };
@@ -774,79 +890,164 @@ export function createApprovalsProvider(options: ItemsOptions): ApprovalsProvide
     },
 
     /**
-     * Decisions come from the work item's own revisions. Who decided and when are
+     * Decisions come from the work item's own history. Who decided and when are
      * System.ChangedBy and System.ChangedDate on the revision that set the state —
      * storing them again in custom fields would be a second copy of a record Azure
      * DevOps already keeps and shows.
+     *
+     * Read from `updates` rather than `revisions`: deltas, not snapshots. It is a
+     * fraction of the payload — the same swap that took 16KB off the solution panel —
+     * and it removes the state-comparison this loop used to need. A revision list
+     * repeats the state on every later edit, so "the revision that CHANGED it" had to
+     * be inferred by remembering the previous one; on an update the field is simply
+     * absent unless that revision set it.
+     *
+     * Rests on `transition` writing State and DecisionRationale in ONE patch, so both
+     * land on the same update. Splitting that patch would silently empty the
+     * rationale here.
      */
     async listDecisions(subjectId): Promise<Decision[]> {
-      const history = await client.get<{ value?: { rev: number; fields: Record<string, unknown> }[] }>(
-        `_apis/wit/workitems/${encodeURIComponent(subjectId)}/revisions`,
-        "list decisions",
-      );
-
-      const revisions = history.value ?? [];
+      const updates = await workItemUpdates(client, subjectId, "list decisions");
       const decisions: Decision[] = [];
-      let previous: unknown;
 
-      for (const revision of revisions) {
-        const state = revision.fields[FIELDS.state];
-        const isDecision = state === "Accepted" || state === "Rejected" || state === "Published";
-        // Only the revision that CHANGED the state is a decision; later edits keep
-        // the same state and are not new decisions.
-        if (isDecision && state !== previous) {
-          const changedBy = revision.fields[FIELDS.changedBy];
-          decisions.push({
-            id: `${subjectId}-${revision.rev}`,
-            subjectId,
-            approverId:
-              typeof changedBy === "object" && changedBy && "uniqueName" in changedBy
-                ? String((changedBy as { uniqueName: unknown }).uniqueName)
-                : String(changedBy ?? ""),
-            decision: state === "Rejected" ? "Reject" : "Accept",
-            rationale: String(revision.fields[FIELDS.decisionRationale] ?? ""),
-            decidedAt: String(revision.fields[FIELDS.changedDate] ?? ""),
-          });
-        }
-        previous = state;
+      for (const update of updates) {
+        const state = updatedValue(update, FIELDS.state);
+        if (state !== "Accepted" && state !== "Rejected" && state !== "Published") continue;
+
+        const changedBy = updatedValue(update, FIELDS.changedBy);
+        decisions.push({
+          id: `${subjectId}-${update.rev}`,
+          subjectId,
+          approverId:
+            typeof changedBy === "object" && changedBy && "uniqueName" in changedBy
+              ? String((changedBy as { uniqueName: unknown }).uniqueName)
+              : String(changedBy ?? ""),
+          decision: state === "Rejected" ? "Reject" : "Accept",
+          rationale: String(updatedValue(update, FIELDS.decisionRationale) ?? ""),
+          // NOT the update's own revisedDate: that carries a 9999-01-01 sentinel on
+          // the newest revision, which would render as a decision made in the year
+          // 9999.
+          decidedAt: String(updatedValue(update, FIELDS.changedDate) ?? ""),
+        });
       }
       return decisions;
     },
 
     /**
-     * A plain Related link. Reviewer-only, which is what lets it carry no
-     * attributes — there is no proposal to hold pending and nothing to classify.
+     * PROPOSE the link. Open to anyone who can see both items, and it writes NOTHING to
+     * Azure DevOps.
+     *
+     * The proposal is a Dataverse row in `Pending`; `approveLink` below writes the ADO
+     * relation. That ordering is the design, not an implementation detail: it is what
+     * lets `listLinkedSolutions` and every other reader of ADO relations show approved
+     * links only, without carrying an approval filter that a future read path would
+     * forget to apply.
+     *
+     * Both work items are read first, so a proposal cannot be made against an id the
+     * caller cannot see — visibility is the gate on proposing, and this is where it is
+     * actually checked.
      */
     async linkSolution(ideaId, solutionId): Promise<IdeaSolutionLink> {
+      await Promise.all([
+        getWorkItem(client, ideaId, "read idea for link"),
+        getWorkItem(client, solutionId, "read solution for link"),
+      ]);
+      return links.propose(ideaId, solutionId);
+    },
+
+    /** Reviewers only, and empty rather than a throw for everyone else — see the contract. */
+    async listPendingLinks(): Promise<PendingLink[]> {
+      if (!canReview(await role())) return [];
+      return withTitles(await links.listPending());
+    },
+
+    /** One idea's proposals, open to anyone who can see it. */
+    async listProposedLinks(ideaId): Promise<PendingLink[]> {
+      return withTitles(await links.listPending(ideaId));
+    },
+
+    /**
+     * Approve, and create the Azure DevOps `Related` link.
+     *
+     * The ADO write happens AFTER the decision is recorded, and the order matters. If
+     * the ADO patch fails, the row reads Approved with no relation — visible in the
+     * approvals history, absent from the catalogue, and re-approvable. The reverse order
+     * would create a live link with no record of who approved it, which is the failure
+     * this whole design exists to prevent.
+     */
+    async approveLink(ideaId, solutionId, rationale): Promise<IdeaSolutionLink> {
       await requireReviewer(role);
+      if (!rationale.trim()) {
+        throw new AppError("A rationale is required.", { category: "validation" });
+      }
+
+      const decided = await links.decide(ideaId, solutionId, "Approved", rationale);
+
       const { organization } = await client.context();
-
       const item = await getWorkItem(client, ideaId, "check existing link");
-      const already = relatedItems(item).ids.includes(solutionId);
-
-      if (!already) {
+      if (!relatedItems(item).ids.includes(solutionId)) {
         await client.patch(
           `_apis/wit/workitems/${encodeURIComponent(ideaId)}`,
           [addRelation(RELATED, workItemUrl(organization, solutionId))],
           "link solution",
         );
       }
-      return { ideaId, solutionId, addedBy: "", addedAt: new Date().toISOString() };
+      return decided;
     },
 
-    async unlinkSolution(ideaId, solutionId) {
+    /** Reject. Nothing is written to Azure DevOps, then or ever. */
+    async rejectLink(ideaId, solutionId, rationale): Promise<IdeaSolutionLink> {
       await requireReviewer(role);
+      if (!rationale.trim()) {
+        throw new AppError("A rationale is required.", { category: "validation" });
+      }
+      return links.decide(ideaId, solutionId, "Rejected", rationale);
+    },
+
+    /**
+     * Remove an APPROVED link. Narrower than proposing, on purpose: the solution's owner
+     * or a reviewer.
+     *
+     * Proposing is cheap and reversible — a reviewer decides before it means anything.
+     * Removing an approved link undoes a decision that was already made, and leaves
+     * nothing behind but an activity row, so it stays with the people who answer for the
+     * solution.
+     *
+     * Keyed on the SOLUTION, not the idea. The link is a claim about what the solution
+     * answers, and its owner is the person who knows whether that claim is true.
+     *
+     * Both stores are cleared. Removing the ADO relation while leaving the Dataverse row
+     * saying "Approved" would leave the authoritative record asserting a link that does
+     * not exist — and would make the pair unproposable, because `propose` would keep
+     * finding a decided row.
+     */
+    async unlinkSolution(ideaId, solutionId) {
+      await assertSolutionEditor(
+        await getWorkItem(client, solutionId, "read solution for unlink"),
+        role,
+        currentUserId,
+      );
+
       const item = await getWorkItem(client, ideaId, "find link to remove");
       const index = (item.relations ?? []).findIndex(
         (relation) => relation.rel === RELATED && relation.url.endsWith(`/${solutionId}`),
       );
-      if (index < 0) return;
 
-      await client.patch(
-        `_apis/wit/workitems/${encodeURIComponent(ideaId)}`,
-        [{ op: "remove", path: `/relations/${index}` }],
-        "unlink solution",
-      );
+      if (index >= 0) {
+        await client.patch(
+          `_apis/wit/workitems/${encodeURIComponent(ideaId)}`,
+          [{ op: "remove", path: `/relations/${index}` }],
+          "unlink solution",
+        );
+      }
+
+      /*
+        Unconditional, and outside the `index >= 0` guard on purpose: a pair with a
+        decided row but no ADO relation is exactly the state an interrupted approval
+        leaves behind, and this is the call that repairs it. Doing it last means a failed
+        ADO patch leaves the decision standing rather than silently dropping it.
+      */
+      await links.forget(ideaId, solutionId);
     },
 
     /**
@@ -901,7 +1102,7 @@ export function toSearchRow(solution: Solution): SearchItem {
 }
 
 /** One WIQL pass over both types, so a search is two calls rather than four. */
-export function createSearch(client: AdoClient, role: () => Promise<Role>) {
+export function createSearch(loader: WorkItemLoader, role: () => Promise<Role>) {
   return async function search(query: SearchQuery): Promise<SearchResult> {
     const canSeeUnreviewed = canReview(await role());
 
@@ -923,7 +1124,7 @@ export function createSearch(client: AdoClient, role: () => Promise<Role>) {
 
     const skip = query.skip ?? 0;
     const take = query.take ?? 25;
-    const items = await queryWorkItems(client, wiql, LIST_FIELDS, skip + take);
+    const items = await loader.list(wiql, LIST_FIELDS, skip + take);
 
     const rows: SearchItem[] = items.map((item) => {
       const isSolution = item.fields[FIELDS.workItemType] === WIT.solution;

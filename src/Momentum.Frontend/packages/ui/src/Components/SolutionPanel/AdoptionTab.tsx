@@ -1,11 +1,18 @@
 import { useState } from "react";
 import type React from "react";
+import { canManageAdoption, type Role } from "@innovation-backlog/logic";
 import styles from "./styles";
 import type { SolutionUse } from "../../types";
 import { Empty } from "../Empty/Empty";
 import { adoptionTone } from "./solutionTone";
 import { errorText, initials, personName, relativeTime } from "../../utils";
 
+/*
+  Withdrawn is absent on purpose. It is not a stage an adoption moves THROUGH — it takes
+  the row off the list entirely — so picking it out of a select that also holds
+  "Implementing" would read as a stage change and silently be a removal. It gets its own
+  control, the same one the roadmap uses to retire a milestone.
+*/
 const STATUSES = ["Exploring", "Implementing", "Using"] as const;
 
 /**
@@ -14,31 +21,52 @@ const STATUSES = ["Exploring", "Implementing", "Using"] as const;
  * The rows, not the tally: someone deciding whether to adopt wants to see the other
  * adopters — which team, on what, how far along, and whether anyone finished — and
  * every one of those facts was already in the response that produced the count.
+ *
+ * Every row used to be editable by every reader — the status select was ungated, so any
+ * viewer could move somebody else's adoption from Exploring to Using. Now a row is
+ * editable by the person who recorded it and by reviewers; everyone else reads it.
  */
 export function AdoptionTab({
   adoptions,
   adoptionCount,
   teams,
+  role,
   onRecord,
   onSetStatus,
+  onWithdraw,
 }: {
   adoptions: SolutionUse[];
   /** The rollup's count, which survives when the rows themselves could not be read. */
   adoptionCount: number;
   teams: number;
+  role: Role;
   onRecord: () => void;
   onSetStatus: (useId: string, status: string) => Promise<void>;
+  onWithdraw: (useId: string) => Promise<void>;
 }): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
 
-  async function setStatus(useId: string, status: string) {
+  /*
+    `startedByMe` comes off the row and is resolved by the provider — the adopter's id
+    and the signed-in user's id live in different stores, so this component cannot work
+    it out and must not try. A host that omits the flag leaves every row read-only.
+  */
+  const canManage = (use: SolutionUse) =>
+    canManageAdoption(role, use.startedByMe === true);
+
+  async function guard(work: () => Promise<void>) {
     setError(null);
     try {
-      await onSetStatus(useId, status);
+      await work();
     } catch (cause) {
       setError(errorText(cause));
     }
   }
+
+  const setStatus = (useId: string, status: string) =>
+    guard(() => onSetStatus(useId, status));
+
+  const withdraw = (useId: string) => guard(() => onWithdraw(useId));
 
   return (
     <>
@@ -67,7 +95,13 @@ export function AdoptionTab({
         ) : (
           <ul className={styles.adoptionList}>
             {adoptions.map((use) => (
-              <AdoptionRow key={use.id} use={use} onSetStatus={setStatus} />
+              <AdoptionRow
+                key={use.id}
+                use={use}
+                canManage={canManage(use)}
+                onSetStatus={setStatus}
+                onWithdraw={withdraw}
+              />
             ))}
           </ul>
         )}
@@ -86,10 +120,15 @@ export function AdoptionTab({
  */
 function AdoptionRow({
   use,
+  canManage,
   onSetStatus,
+  onWithdraw,
 }: {
   use: SolutionUse;
+  /** The person who recorded it, or a reviewer. See `canManageAdoption`. */
+  canManage: boolean;
   onSetStatus: (useId: string, status: string) => Promise<void>;
+  onWithdraw: (useId: string) => Promise<void>;
 }): React.ReactElement {
   const who = use.startedByName?.trim() || personName(use.startedBy);
   const heading = use.team?.trim() || use.projectName || "A team";
@@ -115,8 +154,21 @@ function AdoptionRow({
         </span>
       </div>
 
-      {settled ? (
-        <span className={`${styles.pill} ${styles.toneSuccess}`}>Rolled out</span>
+      {/*
+        A settled rollout keeps its flat pill whoever is reading — the stage is over.
+        An unsettled row is a select only for the people who may change it; everyone
+        else gets the same pill, so the list reads identically and simply offers less.
+      */}
+      {settled || !canManage ? (
+        <span
+          className={
+            settled
+              ? `${styles.pill} ${styles.toneSuccess}`
+              : `${styles.pill} ${styles[`tone${cap(tone)}`] ?? ""}`.trim()
+          }
+        >
+          {settled ? "Rolled out" : use.status || "Exploring"}
+        </span>
       ) : (
         <select
           className={`${styles.pill} ${styles.pillSelect} ${styles[`tone${cap(tone)}`] ?? ""}`.trim()}
@@ -130,6 +182,24 @@ function AdoptionRow({
             </option>
           ))}
         </select>
+      )}
+
+      {/*
+        The same affordance `RoadmapTimeline` uses to retire a milestone, because it is
+        the same act on the same kind of record: a tombstone, not a delete. Shown for a
+        settled rollout too — "we stopped using it" is something that happens after a
+        finished rollout, not instead of one.
+      */}
+      {canManage && (
+        <button
+          type="button"
+          className={styles.rowRemove}
+          aria-label={`Withdraw the adoption for ${heading}`}
+          title="Withdraw"
+          onClick={() => void onWithdraw(use.id)}
+        >
+          ×
+        </button>
       )}
     </li>
   );

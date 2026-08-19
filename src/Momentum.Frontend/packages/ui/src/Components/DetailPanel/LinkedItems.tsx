@@ -32,6 +32,8 @@ export function LinkedItems({
   searchLabel,
   noResultsText,
   removeVerb,
+  canUnlink,
+  pendingItems,
   search,
   onOpen,
   onLink,
@@ -47,6 +49,26 @@ export function LinkedItems({
   noResultsText: string;
   /** Verb for the remove button's label: "Disconnect", "Remove". */
   removeVerb: string;
+  /**
+   * Whether the reader may take an existing link away.
+   *
+   * Linking has no equivalent flag because it is open to anyone who can see both items.
+   * Removing is not: adding a claim is cheap and reversible, dropping somebody else's
+   * leaves nothing behind but an activity row, so the two are deliberately asymmetric.
+   * Both buttons used to be shown to everyone while the provider refused both, which
+   * meant an ordinary reader was invited to do two things that could only fail.
+   */
+  canUnlink: boolean;
+  /**
+   * Proposed and waiting on a reviewer.
+   *
+   * Rendered separately and never mixed into `items`, because they are not true yet —
+   * an approved link is a claim the hub stands behind, a proposal is one person's
+   * suggestion. They are shown at all because nothing is written to Azure DevOps until
+   * approval, so without this the person who proposed one sees the panel exactly as it
+   * was before they clicked and reasonably concludes it failed.
+   */
+  pendingItems?: LinkedItemRow[];
   /** Candidates for `query`, already filtered to what may be linked. */
   search: (query: string) => Promise<SearchItem[]>;
   onOpen: (id: string) => void;
@@ -101,7 +123,7 @@ export function LinkedItems({
         )}
       </div>
 
-      {items.length === 0 ? (
+      {items.length === 0 && (pendingItems?.length ?? 0) === 0 ? (
         <p className={styles.muted}>{emptyText}</p>
       ) : (
         <ul className={styles.ideaList}>
@@ -115,15 +137,33 @@ export function LinkedItems({
                 <span className={styles.ideaTitle}>{item.title}</span>
                 <span className={styles.ideaMeta}>{item.meta}</span>
               </button>
-              <button
-                type="button"
-                className={styles.rowRemove}
-                aria-label={`${removeVerb} ${item.title}`}
-                title={removeVerb}
-                onClick={() => void onUnlink(item.id)}
-              >
-                ×
-              </button>
+              {canUnlink && (
+                <button
+                  type="button"
+                  className={styles.rowRemove}
+                  aria-label={`${removeVerb} ${item.title}`}
+                  title={removeVerb}
+                  onClick={() => void onUnlink(item.id)}
+                >
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+
+          {/*
+            Proposals, after the approved rows and visibly not among them. No open
+            handler and no remove: until a reviewer decides, the claim is not the hub's
+            to stand behind, and the person who proposed it cannot take it back through
+            this control — unlinking is for approved links.
+          */}
+          {pendingItems?.map((item) => (
+            <li key={`pending-${item.id}`} className={`${styles.ideaRow} ${styles.ideaPending}`}>
+              <span className={styles.ideaOpen}>
+                <span className={styles.ideaTitle}>{item.title}</span>
+                <span className={styles.ideaMeta}>{item.meta}</span>
+              </span>
+              <span className={styles.pendingTag}>Waiting for review</span>
             </li>
           ))}
         </ul>

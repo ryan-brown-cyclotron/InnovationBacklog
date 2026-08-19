@@ -251,6 +251,29 @@
   color: var(--text-muted);
 }
 
+/*
+  A proposed link, not an approved one. Dashed and recessed so it reads as provisional
+  at a glance rather than needing its tag to be read — the row is deliberately quieter
+  than the approved rows it sits under.
+*/
+.ideaPending {
+  border-style: dashed;
+  background: transparent;
+  align-items: center;
+}
+
+.pendingTag {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warning-soft, var(--bg-subtle));
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .rowRemove {
   flex: 0 0 auto;
   width: 24px;

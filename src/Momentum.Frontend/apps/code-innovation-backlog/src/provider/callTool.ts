@@ -90,13 +90,17 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
 
       // ------------------------------------------------------------- approvals
       if (head === "approvals") {
+        /*
+          Links are fetched separately rather than folded into the inbox. The three
+          queues are loaded in parallel by useApprovals, so each route already pays for
+          its own read — and a pending link needs both work item titles hydrated, which
+          the ideas and solutions queues should not be charged for.
+        */
+        if (second === "links") return provider.approvals.listPendingLinks();
+
         const inbox = await provider.approvals.getInbox();
         if (second === "inbox") return inbox.ideas;
         if (second === "solutions") return inbox.solutions;
-        // Links carry no approval state any more — they are reviewer-created, so
-        // nothing is ever pending. The UI's link queue is permanently empty rather
-        // than removed, so the shared component keeps working unchanged.
-        if (second === "links") return [];
       }
 
       // ----------------------------------------------------------- attachments
@@ -174,15 +178,33 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
           return provider.collaboration.listActivity({ subjectId: ideaId, subjectType: "Idea" });
         }
         if (third === "decisions") return provider.approvals.listDecisions(ideaId);
+        // Approved links only — they are ADO relations, and nothing reaches ADO before
+        // approval. What has been proposed and not yet decided is `proposed` below.
         if (third === "solutions") return provider.ideas.listLinkedSolutions(ideaId);
+        if (third === "proposed") return provider.approvals.listProposedLinks(ideaId);
 
+        // Proposes it. Nothing reaches Azure DevOps until a reviewer approves.
         if (third === "link") return provider.approvals.linkSolution(ideaId, str(body.solutionId));
         if (third === "unlink") {
           await provider.approvals.unlinkSolution(ideaId, str(body.solutionId));
           return null;
         }
-        // A link decision is a no-op: reviewer-created links are never pending.
-        if (third === "links" && fourth) return null;
+
+        /*
+          POST /api/requests/{ideaId}/links/{solutionId}/{accept|reject}.
+
+          `fourth` is the solution id and `fifth` the verb, matching the shape the idea
+          and solution decisions already use one level up. Approving is what writes the
+          ADO `Related` link.
+        */
+        if (third === "links" && fourth) {
+          if (fifth === "accept") {
+            return provider.approvals.approveLink(ideaId, fourth, str(body.rationale));
+          }
+          if (fifth === "reject") {
+            return provider.approvals.rejectLink(ideaId, fourth, str(body.rationale));
+          }
+        }
 
         if (third === "canonical") {
           return provider.approvals.selectCanonicalSolution(ideaId, str(body.solutionId));
@@ -268,6 +290,14 @@ export function createCallToolService(provider: InnovationBacklogProvider): ISer
         if (third === "use") {
           if (method === "POST" && fourth && fifth === "complete") {
             return provider.engagement.completeAdoption(solutionId, fourth);
+          }
+          /*
+            POST .../withdraw, not DELETE. The row is retained and its status becomes
+            Withdrawn — a DELETE here would advertise a hard delete, which would
+            silently change every historical rollup that counted the adoption.
+          */
+          if (method === "POST" && fourth && fifth === "withdraw") {
+            return provider.engagement.withdrawAdoption(solutionId, fourth);
           }
           if (method === "PATCH" && fourth) {
             return provider.engagement.updateAdoption(solutionId, fourth, {

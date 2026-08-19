@@ -8,11 +8,12 @@ import type {
   Participation,
   ParticipationStatus,
   RequestParticipationInput,
+  Role,
   StartAdoptionInput,
   UpdateAdoptionInput,
   VoteSummary,
 } from "@innovation-backlog/logic";
-import { targetKey } from "@innovation-backlog/logic";
+import { canManageAdoption, targetKey } from "@innovation-backlog/logic";
 
 import { Cycai_votesService } from "../../generated/services/Cycai_votesService.js";
 import { Cycai_adoptionsService } from "../../generated/services/Cycai_adoptionsService.js";
@@ -62,14 +63,47 @@ function compact<T extends Record<string, unknown>>(record: T): T {
   return record;
 }
 
-function toAdoption(row: Cycai_adoptions): Adoption {
+/**
+ * The status choice as a domain value.
+ *
+ * Exported because `adoptionFacts` in rollups.ts has to reach the same answer from the
+ * same row — the panel's list and the count above it are computed by different code
+ * over the same table, and a second copy of the translation is a second thing to get
+ * wrong. Reading is name-based rather than through `valueOf`, so an option this build
+ * does not know about degrades to the fallback instead of throwing.
+ */
+export function adoptionStatusOf(row: Pick<Cycai_adoptions, "cycai_adoptionstatus">): AdoptionStatus {
+  return nameOf<AdoptionStatus>(ADOPTION_STATUS, row.cycai_adoptionstatus, "Exploring");
+}
+
+/**
+ * Same systemuser, tolerant of the braces Dataverse sometimes wraps a GUID in.
+ *
+ * An exact join, unlike the display-name comparison the panel used to make: both sides
+ * are systemuser GUIDs here, which is the whole reason `startedByMe` is resolved in
+ * this file and not in the UI.
+ */
+function isSameSystemUser(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = a ? guid(a).toLowerCase() : "";
+  const right = b ? guid(b).toLowerCase() : "";
+  return Boolean(left && right && left === right);
+}
+
+/**
+ * `myUserId` is the caller's systemuserid, or null before identity resolves — which
+ * makes `startedByMe` false, so the row renders read-only rather than briefly editable.
+ * The safe direction: a control that appears late is better than one that appears for
+ * somebody who should not have it.
+ */
+function toAdoption(row: Cycai_adoptions, myUserId: string | null): Adoption {
   return {
     id: row.cycai_adoptionid,
     solutionId: String(row.cycai_solutionid),
     startedBy: row._cycai_startedbyid_value ?? "",
+    startedByMe: isSameSystemUser(row._cycai_startedbyid_value, myUserId),
     projectName: row.cycai_projectname,
     team: row.cycai_team ?? null,
-    status: nameOf<AdoptionStatus>(ADOPTION_STATUS, row.cycai_adoptionstatus, "Exploring"),
+    status: adoptionStatusOf(row),
     startedAt: row.cycai_startedon ?? row.createdon ?? "",
     updatedAt: row.modifiedon ?? row.createdon ?? "",
     completedAt: row.cycai_completedon ?? null,
@@ -96,6 +130,15 @@ export interface EngagementOptions {
   /** Dataverse systemuserid of the caller. Null until identity resolves. */
   currentUserId: () => Promise<string | null>;
   /**
+   * The caller's role, for `canManageAdoption`.
+   *
+   * Adoption rows had no permission check at all: any reader could move anybody's
+   * adoption between stages. Role alone does not answer it — the person who recorded
+   * the adoption may manage it whatever their role — so this pairs with the
+   * `startedByMe` join above.
+   */
+  role: () => Promise<Role>;
+  /**
    * Turns adopter GUIDs into names, batched for the whole list.
    *
    * `cycai_startedbyid` is a lookup, so the row carries a GUID and nothing else —
@@ -114,6 +157,35 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
       });
     }
     return id;
+  }
+
+  /**
+   * The person who recorded this adoption, or a reviewer. Returns the caller's
+   * systemuserid so the mapper that follows does not resolve it a second time.
+   *
+   * Costs one GET before each adoption write, and there is no way around it: the rule
+   * needs the row's starter, and trusting an id the caller passed in would be no check
+   * at all. `_cycai_startedbyid_value` is named in the $select explicitly — omit it and
+   * Dataverse leaves the lookup ABSENT from the row rather than null, which would make
+   * `startedByMe` false for the real adopter and lock them out of their own row.
+   */
+  async function requireAdoptionManager(adoptionId: string): Promise<string | null> {
+    const [me, currentRole] = await Promise.all([options.currentUserId(), options.role()]);
+
+    const row = unwrap(
+      await Cycai_adoptionsService.get(adoptionId, {
+        select: ["cycai_adoptionid", "_cycai_startedbyid_value"],
+      }),
+      "read adoption",
+    );
+
+    if (!canManageAdoption(currentRole, isSameSystemUser(row._cycai_startedbyid_value, me))) {
+      throw new AppError(
+        "Only the person who recorded this adoption, or a reviewer, can change it.",
+        { category: "permission" },
+      );
+    }
+    return me;
   }
 
   async function summarize(target: HubItemRef, userId: string): Promise<VoteSummary> {
@@ -205,13 +277,29 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
      * for the whole list rather than per row.
      */
     async listAdoptions(solutionId) {
-      const rows = await fetchAll<Cycai_adoptions>(
-        (o) => Cycai_adoptionsService.getAll(o),
-        "list adoptions",
-        { filter: `cycai_solutionid eq ${Number(solutionId)}`, orderBy: ["cycai_startedon desc"] },
-      );
+      const [rows, myUserId] = await Promise.all([
+        fetchAll<Cycai_adoptions>(
+          (o) => Cycai_adoptionsService.getAll(o),
+          "list adoptions",
+          { filter: `cycai_solutionid eq ${Number(solutionId)}`, orderBy: ["cycai_startedon desc"] },
+        ),
+        options.currentUserId(),
+      ]);
 
-      const adoptions = rows.map(toAdoption);
+      /*
+        Withdrawn rows are dropped HERE rather than in the $filter, and that is
+        deliberate: an OData clause would need the choice's integer value, and
+        `valueOf` throws until the `Withdrawn` option exists in the environment. Reading
+        the list must not depend on a schema change that has not landed yet — only
+        writing a withdrawal does.
+
+        Same shape as the milestone tombstone: `deleteMilestone` writes Cancelled and
+        `listMilestones` filters it out, so the row survives for history while
+        disappearing from the surface.
+      */
+      const adoptions = rows
+        .map((row) => toAdoption(row, myUserId))
+        .filter((adoption) => adoption.status !== "Withdrawn");
       const unresolved = [...new Set(adoptions.map((row) => row.startedBy).filter(Boolean))];
       if (!options.resolveUsers || unresolved.length === 0) return adoptions;
 
@@ -234,6 +322,12 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
       }));
     },
 
+    /**
+     * Open to anyone who can see the solution, and no role check by design — the same
+     * reasoning `createIssue` states for itself. Recording that your team uses
+     * something is an inbound signal, and gating it loses the signal rather than
+     * deferring it. What IS gated is touching a row somebody else recorded.
+     */
     async startAdoption(solutionId, input: StartAdoptionInput) {
       const userId = await requireUser();
       const created = unwrap(
@@ -250,10 +344,13 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
         ),
         "start adoption",
       );
-      return toAdoption(created);
+      // The caller just recorded it, so `startedByMe` is true by construction — which
+      // matters because a create response need not echo the lookup back.
+      return toAdoption(created, userId);
     },
 
     async updateAdoption(_solutionId, adoptionId, patch: UpdateAdoptionInput) {
+      const me = await requireAdoptionManager(adoptionId);
       const updated = unwrap(
         await Cycai_adoptionsService.update(
           adoptionId,
@@ -266,11 +363,12 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
         ),
         "update adoption",
       );
-      return toAdoption(updated);
+      return toAdoption(updated, me);
     },
 
     /** Settling stamps the timestamp AND the status; the UI derives "active" from status. */
     async completeAdoption(_solutionId, adoptionId) {
+      const me = await requireAdoptionManager(adoptionId);
       const updated = unwrap(
         await Cycai_adoptionsService.update(
           adoptionId,
@@ -281,7 +379,34 @@ export function createEngagementProvider(options: EngagementOptions): Engagement
         ),
         "complete adoption",
       );
-      return toAdoption(updated);
+      return toAdoption(updated, me);
+    },
+
+    /**
+     * The status only — `cycai_completedon` is deliberately NOT stamped.
+     *
+     * That timestamp is what `adoptionFacts` reads to decide rolled-out versus active,
+     * and a withdrawal is the opposite claim. Writing it would turn "we stopped using
+     * this" into "we finished rolling it out" in every rollup.
+     *
+     * BLOCKED until `Withdrawn` exists as an option on `cycai_adoptionstatus` in the
+     * environment (and `Cycai_adoptionsModel.ts` is regenerated). Until then `valueOf`
+     * throws a validation AppError naming the unknown choice — the write fails whole
+     * and nothing is half-applied, which is why the reads above were kept independent
+     * of the option value.
+     */
+    async withdrawAdoption(_solutionId, adoptionId) {
+      const me = await requireAdoptionManager(adoptionId);
+      const updated = unwrap(
+        await Cycai_adoptionsService.update(
+          adoptionId,
+          compact({
+            cycai_adoptionstatus: valueOf(ADOPTION_STATUS, "Withdrawn"),
+          }) as never,
+        ),
+        "withdraw adoption",
+      );
+      return toAdoption(updated, me);
     },
 
     // -----------------------------------------------------------------------

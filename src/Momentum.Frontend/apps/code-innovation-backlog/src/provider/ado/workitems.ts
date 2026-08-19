@@ -401,15 +401,18 @@ export function toMilestone(item: WorkItem, solutionId: string): Milestone {
  * Projections for the child types.
  *
  * Separate from LIST_FIELDS on purpose: every idea and solution list pays for that
- * one, and neither needs a target date.
+ * one, and neither needs a target date. Both carry `System.WorkItemType` because
+ * issues and milestones arrive from ONE query and are told apart by it.
  */
 export const ISSUE_FIELDS = [
   FIELDS.id, FIELDS.title, FIELDS.description, FIELDS.state, FIELDS.parent,
+  FIELDS.workItemType,
   FIELDS.assignedTo, FIELDS.createdBy, FIELDS.createdDate, FIELDS.changedDate,
 ] as const;
 
 export const MILESTONE_FIELDS = [
   FIELDS.id, FIELDS.title, FIELDS.description, FIELDS.state, FIELDS.parent,
+  FIELDS.workItemType,
   FIELDS.targetDate, FIELDS.targetLabel, FIELDS.createdDate, FIELDS.changedDate,
 ] as const;
 
@@ -433,44 +436,111 @@ export function parentClause(solutionId: string): string | null {
 export const wiqlString = odataString;
 
 /**
- * Run a WIQL query and hydrate the results.
+ * The two-hop reader: WIQL or relations produce ids, `workitemsbatch` turns them
+ * into rows.
  *
- * WIQL returns ids only. `workitemsbatch` takes EITHER a field projection OR
- * `$expand`, never both, so a list asks for fields and a detail view expands
- * relations — see `getWorkItem`.
+ * Its reason to exist is that the second hop used to be one request per caller.
+ * Opening a solution asked for three work items in three POSTs — an issue, a linked
+ * idea and a milestone — because the three call sites that wanted them are unrelated
+ * and each hydrated its own. They all land within the same tick, so `hydrate`
+ * collects the ids requested across that tick and issues ONE batch for the union.
+ *
+ * `workitemsbatch` takes a single `fields` array for the whole request, so the
+ * projections are unioned too: a slightly wider row per item, in exchange for two
+ * fewer round trips.
+ *
+ * NOT used by `createWorkItemFacts`, and it cannot be — that one asks for
+ * `$expand=Relations`, which the endpoint refuses to combine with `fields`.
  */
-export async function queryWorkItems(
-  client: AdoClient,
-  wiql: string,
-  fields: readonly string[],
-  limit = 200,
-): Promise<WorkItem[]> {
-  const query = await client.post<{ workItems?: { id: number }[] }>(
-    "_apis/wit/wiql",
-    { query: wiql },
-    "run work item query",
-  );
+export interface WorkItemLoader {
+  /** Run a WIQL query and hydrate the results, in the query's own order. */
+  list(wiql: string, fields: readonly string[], limit?: number): Promise<WorkItem[]>;
+  /** Hydrate known ids, coalescing with every other id asked for in the same tick. */
+  hydrate(ids: readonly number[], fields: readonly string[]): Promise<WorkItem[]>;
+}
 
-  const ids = (query.workItems ?? []).slice(0, limit).map((w) => w.id);
-  if (ids.length === 0) return [];
+interface PendingBatch {
+  ids: Set<number>;
+  fields: Set<string>;
+  rows: Promise<Map<number, WorkItem>>;
+}
 
-  const chunks: number[][] = [];
-  for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+export function createWorkItemLoader(client: AdoClient): WorkItemLoader {
+  let pending: PendingBatch | null = null;
 
-  const pages = await Promise.all(
-    chunks.map((chunk) =>
-      client.post<{ value?: WorkItem[] }>(
-        "_apis/wit/workitemsbatch",
-        { ids: chunk, fields: [...fields] },
-        "fetch work items",
+  async function fetchBatch(ids: number[], fields: string[]): Promise<Map<number, WorkItem>> {
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+
+    const pages = await Promise.all(
+      chunks.map((chunk) =>
+        client.read<{ value?: WorkItem[] }>(
+          "_apis/wit/workitemsbatch",
+          /*
+            `omit` rather than the default `fail`, and it matters more now than it
+            did: a merged batch carries ids from callers that know nothing about each
+            other, so one item the reader cannot see would otherwise fail three lists
+            at once instead of dropping one row from one of them.
+          */
+          { ids: chunk, fields, errorPolicy: "omit" },
+          "fetch work items",
+        ),
       ),
-    ),
-  );
+    );
 
-  // The batch call loses WIQL's ordering; restore it from the id order.
-  const byId = new Map<number, WorkItem>();
-  for (const page of pages) for (const item of page.value ?? []) byId.set(item.id, item);
-  return ids.map((id) => byId.get(id)).filter((item): item is WorkItem => Boolean(item));
+    const byId = new Map<number, WorkItem>();
+    for (const page of pages) for (const item of page.value ?? []) byId.set(item.id, item);
+    return byId;
+  }
+
+  function hydrate(ids: readonly number[], fields: readonly string[]): Promise<WorkItem[]> {
+    const wanted = [...new Set(ids.filter((id) => Number.isFinite(id)))];
+    if (wanted.length === 0) return Promise.resolve([]);
+
+    if (!pending) {
+      const batch: PendingBatch = { ids: new Set(), fields: new Set(), rows: undefined! };
+      /*
+        Queued now, so it runs after every continuation that shares this tick has had
+        its chance to add ids — the two child queries resolve off the same cached
+        WIQL promise, so their `.then`s are already in the microtask queue ahead of
+        this one.
+      */
+      batch.rows = Promise.resolve().then(() => {
+        pending = null;
+        return fetchBatch([...batch.ids], [...batch.fields]);
+      });
+      pending = batch;
+    }
+
+    const batch = pending;
+    for (const id of wanted) batch.ids.add(id);
+    for (const field of fields) batch.fields.add(field);
+
+    return batch.rows.then((byId) =>
+      wanted.map((id) => byId.get(id)).filter((item): item is WorkItem => Boolean(item)),
+    );
+  }
+
+  return {
+    hydrate,
+
+    async list(wiql, fields, limit = 200) {
+      // A read that happens to be a POST: the body is the query, and running it
+      // twice in a tick — which the issue and milestone lists do — is one request.
+      const query = await client.read<{ workItems?: { id: number }[] }>(
+        "_apis/wit/wiql",
+        { query: wiql },
+        "run work item query",
+      );
+
+      const ids = (query.workItems ?? []).slice(0, limit).map((w) => w.id);
+      if (ids.length === 0) return [];
+
+      // The batch call loses WIQL's ordering; `hydrate` returns rows in the order
+      // the ids were asked for, which restores it.
+      return hydrate(ids, fields);
+    },
+  };
 }
 
 /**
@@ -544,21 +614,44 @@ export function getWorkItem(client: AdoClient, id: string, description: string):
   );
 }
 
-/** When a work item first reached a state, from its revisions. */
-export async function stateReachedAt(
-  client: AdoClient,
-  id: string,
-  state: string,
-): Promise<string | null> {
-  const history = await client.get<{ value?: { fields: Record<string, unknown> }[] }>(
-    `_apis/wit/workitems/${encodeURIComponent(id)}/revisions`,
-    "read work item history",
-  );
-  const hit = (history.value ?? []).find((revision) => revision.fields[FIELDS.state] === state);
-  return hit ? text(hit.fields, FIELDS.changedDate) || null : null;
+/**
+ * A field's value after an update, from `_apis/wit/workitems/{id}/updates`.
+ *
+ * `updates` returns what CHANGED on each revision rather than a whole snapshot of
+ * the item, so a field is present on an update only if that revision set it. That is
+ * both a fraction of the payload and a better shape: "the revision that changed the
+ * state" stops being something to infer by comparing consecutive snapshots and
+ * becomes the presence of the key.
+ */
+export interface WorkItemUpdate {
+  rev: number;
+  fields?: Record<string, { oldValue?: unknown; newValue?: unknown }>;
 }
 
-/** List projection. Relations are deliberately absent — see queryWorkItems. */
+export function updatedValue(update: WorkItemUpdate, field: string): unknown {
+  return update.fields?.[field]?.newValue;
+}
+
+/**
+ * The revision history as deltas.
+ *
+ * NOTE the timestamp trap: an update's own `revisedDate` carries a `9999-01-01`
+ * sentinel on the newest revision, so when a date is wanted it comes from
+ * `System.ChangedDate`'s newValue instead.
+ */
+export async function workItemUpdates(
+  client: AdoClient,
+  id: string,
+  description: string,
+): Promise<WorkItemUpdate[]> {
+  const history = await client.get<{ value?: WorkItemUpdate[] }>(
+    `_apis/wit/workitems/${encodeURIComponent(id)}/updates`,
+    description,
+  );
+  return history.value ?? [];
+}
+
+/** List projection. Relations are deliberately absent — see WorkItemLoader. */
 export const LIST_FIELDS = [
   FIELDS.id, FIELDS.title, FIELDS.description, FIELDS.state, FIELDS.tags,
   FIELDS.assignedTo, FIELDS.createdBy, FIELDS.createdDate, FIELDS.changedDate,

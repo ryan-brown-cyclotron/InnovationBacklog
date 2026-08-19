@@ -52,6 +52,9 @@ export function issueTone(status: SolutionIssueStatus): Tone {
  * which is why `completedAt` outranks the status string it is paired with.
  */
 export function adoptionTone(use: Pick<SolutionUse, "status" | "completedAt">): Tone {
+  // Ahead of the timestamp: a withdrawal never stamps `completedAt`, but a row that was
+  // completed and later withdrawn would otherwise still read as a success.
+  if (use.status === "Withdrawn") return "danger";
   if (use.completedAt) return DONE;
   return use.status === "Using" ? DONE : ACTIVE;
 }

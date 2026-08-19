@@ -118,6 +118,44 @@ export function createIdentityProvider(options: IdentityOptions): IdentityProvid
   // identity and Dataverse writes need the systemuserid.
   let cachedSystemUserId: Promise<string | null> | null = null;
 
+  /**
+   * Names already known, keyed by lowercased GUID. A `null` records an id that was
+   * asked for and matched no row — remembered so the same empty answer is not bought
+   * twice — while an id that is absent from the map has simply never been asked for.
+   */
+  const resolved = new Map<string, UserRef | null>();
+  /** Lookups still in the air, so overlapping callers share one query per id. */
+  const inflight = new Map<string, Promise<void>>();
+
+  function lookup(ids: string[]): Promise<void> {
+    const run = (async () => {
+      const rows = await fetchAll<Systemusers>(
+        (o) => SystemusersService.getAll(o),
+        "resolve users",
+        {
+          select: ["systemuserid", "fullname", "internalemailaddress"],
+          filter: anyOf("systemuserid", ids),
+        },
+      );
+
+      for (const id of ids) resolved.set(id, null);
+      for (const row of rows) {
+        resolved.set(guid(row.systemuserid).toLowerCase(), {
+          id: row.systemuserid,
+          displayName: row.fullname,
+          email: row.internalemailaddress,
+        });
+      }
+    })().finally(() => {
+      // Only the entries this call claimed, and only if a later call has not already
+      // replaced them.
+      for (const id of ids) if (inflight.get(id) === run) inflight.delete(id);
+    });
+
+    for (const id of ids) inflight.set(id, run);
+    return run;
+  }
+
   return {
     getCurrentUser: current,
 
@@ -132,25 +170,44 @@ export function createIdentityProvider(options: IdentityOptions): IdentityProvid
     /**
      * Best-effort by contract: an id that will not resolve is simply absent from the
      * result. Name resolution must never fail the list it decorates.
+     *
+     * Memoized per GUID, and per GUID rather than per query on purpose. Opening a
+     * solution resolved the SAME systemuser twice, byte for byte — once for the
+     * activity feed's actors, once for the adoption list's starters — because the two
+     * callers cannot see each other. Caching the request would only have caught the
+     * case where both ask for exactly the same set; caching the person means a lookup
+     * asks only for the ids nobody has asked for yet, and an overlap of one still
+     * saves that one.
+     *
+     * A display name is not engagement data, so unlike votes or adoptions it is safe
+     * to hold for the session — the same reasoning that already caches the current
+     * user above.
      */
     async resolveUsers(ids: string[]): Promise<UserRef[]> {
-      const wanted = ids.map(guid).filter(Boolean);
+      const wanted = [...new Set(ids.map(guid).filter(Boolean).map((id) => id.toLowerCase()))];
       if (wanted.length === 0) return [];
 
-      try {
-        const rows = await fetchAll<Systemusers>((o) => SystemusersService.getAll(o), "resolve users", {
-          select: ["systemuserid", "fullname", "internalemailaddress"],
-          filter: anyOf("systemuserid", wanted),
-        });
-        return rows.map((row) => ({
-          id: row.systemuserid,
-          displayName: row.fullname,
-          email: row.internalemailaddress,
-        }));
-      } catch (error) {
-        console.warn("[code-app] user name resolution unavailable:", error);
-        return [];
+      const missing = wanted.filter((id) => !resolved.has(id));
+      if (missing.length > 0) {
+        try {
+          // Ids already being fetched by a call that has not returned yet are waited
+          // on rather than asked for again — the activity feed and the adoption list
+          // resolve their actors at the same moment, so without this the second one
+          // would still issue a duplicate query.
+          const fresh = missing.filter((id) => !inflight.has(id));
+          if (fresh.length > 0) lookup(fresh);
+          await Promise.all([...new Set(missing.map((id) => inflight.get(id)))]);
+        } catch (error) {
+          // Nothing is remembered on failure: an unreadable table is not a missing
+          // person, and the next call should try again.
+          console.warn("[code-app] user name resolution unavailable:", error);
+          return [];
+        }
       }
+
+      return wanted
+        .map((id) => resolved.get(id))
+        .filter((user): user is UserRef => Boolean(user));
     },
   };
 }

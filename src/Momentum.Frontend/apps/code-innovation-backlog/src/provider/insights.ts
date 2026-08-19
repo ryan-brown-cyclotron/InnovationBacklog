@@ -11,9 +11,8 @@ import type { Cycai_adoptions } from "../generated/models/Cycai_adoptionsModel.j
 import type { Cycai_activities } from "../generated/models/Cycai_activitiesModel.js";
 
 import { countAll, fetchAll, guid } from "./dataverse/paging.js";
-import type { AdoClient } from "./ado/client.js";
-import { FIELDS, LIST_FIELDS, STATE, WIT, queryWorkItems, wiqlString } from "./ado/workitems.js";
-import type { WorkItem } from "./ado/workitems.js";
+import { FIELDS, LIST_FIELDS, STATE, WIT, wiqlString } from "./ado/workitems.js";
+import type { WorkItem, WorkItemLoader } from "./ado/workitems.js";
 import type { RollupItemFacts } from "./dataverse/rollups.js";
 
 /**
@@ -38,8 +37,8 @@ const STALE_AFTER_DAYS = 21;
 /**
  * How time-in-approval is measured here, and why it is not measured the obvious way.
  *
- * Time in state is not a field. `stateReachedAt` can recover it exactly from a work
- * item's revisions, but that is one connector call per item — thirty ideas would spend
+ * Time in state is not a field. `workItemUpdates` can recover it exactly from a work
+ * item's history, but that is one connector call per item — thirty ideas would spend
  * a tenth of the 300-call budget on a single tile. The `request.accepted` activity row
  * carries the decision moment for free, so the duration is measured against the work
  * item's own creation date. The tradeoff is stated on the tile rather than buried:
@@ -83,6 +82,12 @@ const TOP_CONTRIBUTORS = 8;
  * Deliberately a small, named set rather than "anything that happened": a decision or a
  * visibility change is administration, not contribution, and counting it would flatter
  * whoever administers the hub into looking like its most active participant.
+ *
+ * `solutionUse.withdrawn` is absent on the same principle, and absent on purpose rather
+ * than forgotten: taking an adoption back is not a contribution, and crediting it would
+ * let a start/withdraw pair score twice for nothing. Nor is it subtracted — the
+ * leaderboard counts acts, not a net balance, and `solutionUse.started` was true when it
+ * happened.
  */
 const CONTRIBUTION: Record<string, keyof Omit<ContributorInsight, "id" | "name" | "total">> = {
   "request.created": "ideas",
@@ -94,7 +99,8 @@ const CONTRIBUTION: Record<string, keyof Omit<ContributorInsight, "id" | "name" 
 };
 
 export interface InsightsOptions {
-  client: AdoClient;
+  /** The two-hop reader — one WIQL pass per work item type, hydration coalesced. */
+  loader: WorkItemLoader;
   /** Relations per work item, for the linked-solution stage. See createWorkItemFacts. */
   itemFacts: (ids: string[]) => Promise<Map<string, RollupItemFacts>>;
   /**
@@ -105,7 +111,7 @@ export interface InsightsOptions {
 }
 
 export function createInsightsProvider(options: InsightsOptions): InsightsProvider {
-  const { client, itemFacts } = options;
+  const { loader, itemFacts } = options;
 
   /**
    * People, ranked by what they have done.
@@ -153,7 +159,7 @@ export function createInsightsProvider(options: InsightsOptions): InsightsProvid
       `SELECT [${FIELDS.id}] FROM WorkItems` +
       ` WHERE [${FIELDS.workItemType}] = '${wiqlString(type)}'` +
       ` ORDER BY [${FIELDS.createdDate}] DESC`;
-    return queryWorkItems(client, wiql, LIST_FIELDS, 1000);
+    return loader.list(wiql, LIST_FIELDS, 1000);
   }
 
   return {

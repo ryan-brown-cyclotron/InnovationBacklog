@@ -3571,6 +3571,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "cycai_links": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "cycai_linkid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "cycai_momentums": {
     "tableId": "",
     "version": "",

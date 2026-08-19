@@ -7,6 +7,7 @@ import type {
   AcceptanceDecision,
   ActivityRecord,
   Comment,
+  PendingLink,
   Request,
   RequestSummary,
   Solution,
@@ -60,6 +61,7 @@ export function RequestPanel({
   comments,
   activity,
   linkedSolutions,
+  proposedLinks = [],
   requestSummary,
   solutionSummary,
   role,
@@ -72,7 +74,15 @@ export function RequestPanel({
   request: Request;
   comments: Comment[];
   activity: ActivityRecord[];
+  /** APPROVED links. These are Azure DevOps relations, written only on approval. */
   linkedSolutions: Solution[];
+  /**
+   * Proposed and waiting on a reviewer, which exist only in Dataverse.
+   *
+   * Defaulted so a host that does not serve them renders as it always did, rather than
+   * crashing on undefined — the same treatment `decisions` gets.
+   */
+  proposedLinks?: PendingLink[];
   requestSummary: RequestSummary;
   solutionSummary: SolutionSummary;
   role: string;
@@ -306,8 +316,10 @@ export function RequestPanel({
           <IdeaOverviewTab
             request={request}
             linkedSolutions={linkedSolutions}
+            proposedLinks={proposedLinks}
             solutionSummary={solutionSummary}
             canEdit={canEdit}
+            canUnlink={isReviewer}
             stats={[
               { label: "upvotes", value: voteCount },
               { label: "comments", value: summary?.comments ?? comments.length },
